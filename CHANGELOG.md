@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `ProviderClaude` — new provider that shells out to the local `claude` CLI binary
+  - `claude.go`: `claudeProvider` implementing `complete` and `stream` via `exec.CommandContext`
+  - Single-message prompts passed directly via `-p`; multi-turn formatted as `Human:/Assistant:` pairs
+  - System prompt passed via `--append-system-prompt`
+  - `cmdReadCloser` ensures subprocess is reaped on stream close
+- `claude` CLI auto-detection in `configFromEnv()` via `exec.LookPath` — highest priority (claude > openrouter > ollama)
+
 ### Changed
 - Provider priority reversed: `OPENROUTER_API_KEY` (OpenRouter) now takes precedence over `OLLAMA_HOST` (Ollama) when both are set
 - `make build` now builds both `elw` and `elwi` binaries in addition to compiling all packages

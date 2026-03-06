@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 )
+
+// lookPath is a variable so tests can override it to control PATH scanning.
+var lookPath = exec.LookPath
 
 // ProviderType identifies which LLM backend to use.
 type ProviderType string
 
 const (
+	ProviderClaude     ProviderType = "claude"
 	ProviderOllama     ProviderType = "ollama"
 	ProviderOpenRouter ProviderType = "openrouter"
 )
@@ -44,8 +49,16 @@ func normalizeURL(u string) string {
 }
 
 // configFromEnv auto-detects provider and model from environment variables.
-// OpenRouter takes priority over Ollama when both are configured.
+// Priority: claude CLI (if on PATH) > OpenRouter (if API key set) > Ollama (if host set).
 func configFromEnv() (Config, error) {
+	if _, err := lookPath("claude"); err == nil {
+		model := os.Getenv(envModel)
+		return Config{
+			Provider: ProviderClaude,
+			Model:    model,
+		}, nil
+	}
+
 	if key := os.Getenv(envOpenRouterAPIKey); key != "" {
 		model := defaultOpenRouterModel
 		if m := os.Getenv(envModel); m != "" {
@@ -71,5 +84,5 @@ func configFromEnv() (Config, error) {
 		}, nil
 	}
 
-	return Config{}, fmt.Errorf("no LLM provider configured: set %s or %s", envOpenRouterAPIKey, envOllamaHost)
+	return Config{}, fmt.Errorf("no LLM provider configured: install claude CLI, or set %s or %s", envOpenRouterAPIKey, envOllamaHost)
 }

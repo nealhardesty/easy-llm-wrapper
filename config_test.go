@@ -1,10 +1,58 @@
 package llm
 
 import (
+	"fmt"
 	"testing"
 )
 
+// stubLookPathNoClaude replaces lookPath for tests that should not find the claude binary.
+func stubLookPathNoClaude(t *testing.T) {
+	t.Helper()
+	orig := lookPath
+	lookPath = func(name string) (string, error) {
+		if name == "claude" {
+			return "", fmt.Errorf("not found")
+		}
+		return orig(name)
+	}
+	t.Cleanup(func() { lookPath = orig })
+}
+
+func TestConfigFromEnv_Claude(t *testing.T) {
+	orig := lookPath
+	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
+	t.Cleanup(func() { lookPath = orig })
+	t.Setenv(envOllamaHost, "")
+	t.Setenv(envOpenRouterAPIKey, "")
+	t.Setenv(envModel, "")
+
+	cfg, err := configFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != ProviderClaude {
+		t.Errorf("provider = %q, want %q", cfg.Provider, ProviderClaude)
+	}
+}
+
+func TestConfigFromEnv_ClaudePriority(t *testing.T) {
+	orig := lookPath
+	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
+	t.Cleanup(func() { lookPath = orig })
+	t.Setenv(envOllamaHost, "http://localhost:11434")
+	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
+
+	cfg, err := configFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != ProviderClaude {
+		t.Errorf("expected Claude to win priority, got %q", cfg.Provider)
+	}
+}
+
 func TestConfigFromEnv_Ollama(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "http://localhost:11434")
 	t.Setenv(envOpenRouterAPIKey, "")
 	t.Setenv(envModel, "")
@@ -25,6 +73,7 @@ func TestConfigFromEnv_Ollama(t *testing.T) {
 }
 
 func TestConfigFromEnv_OpenRouter(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "")
 	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
 	t.Setenv(envModel, "")
@@ -45,6 +94,7 @@ func TestConfigFromEnv_OpenRouter(t *testing.T) {
 }
 
 func TestConfigFromEnv_OpenRouterPriority(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "http://localhost:11434")
 	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
 	t.Setenv(envModel, "")
@@ -59,6 +109,7 @@ func TestConfigFromEnv_OpenRouterPriority(t *testing.T) {
 }
 
 func TestConfigFromEnv_ModelOverride_Ollama(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "http://localhost:11434")
 	t.Setenv(envOpenRouterAPIKey, "")
 	t.Setenv(envModel, "llama3.1")
@@ -73,6 +124,7 @@ func TestConfigFromEnv_ModelOverride_Ollama(t *testing.T) {
 }
 
 func TestConfigFromEnv_ModelOverride_OpenRouter(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "")
 	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
 	t.Setenv(envModel, "openai/gpt-4o")
@@ -87,6 +139,7 @@ func TestConfigFromEnv_ModelOverride_OpenRouter(t *testing.T) {
 }
 
 func TestConfigFromEnv_OllamaNoScheme(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "192.168.4.252:11434")
 	t.Setenv(envOpenRouterAPIKey, "")
 
@@ -115,6 +168,7 @@ func TestNormalizeURL(t *testing.T) {
 }
 
 func TestConfigFromEnv_NoProvider(t *testing.T) {
+	stubLookPathNoClaude(t)
 	t.Setenv(envOllamaHost, "")
 	t.Setenv(envOpenRouterAPIKey, "")
 
