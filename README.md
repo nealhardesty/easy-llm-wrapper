@@ -4,8 +4,17 @@ A simple, opinionated Go library for making LLM prompt queries via [Ollama](http
 
 ## Installation
 
+**Library:**
+
 ```sh
 go get github.com/nealhardesty/easy-llm-wrapper
+```
+
+**CLI tools:**
+
+```sh
+go install github.com/nealhardesty/easy-llm-wrapper/cmd/elw@latest
+go install github.com/nealhardesty/easy-llm-wrapper/cmd/elwi@latest
 ```
 
 ## Quick Start
@@ -26,11 +35,11 @@ answer, err := client.Ask(ctx, "", "What is the capital of France?")
 
 | Variable             | Description |
 |----------------------|-------------|
-| `OLLAMA_HOST`        | Ollama base URL (e.g. `http://localhost:11434`). When set, Ollama is used. |
-| `OPENROUTER_API_KEY` | OpenRouter API key. Used when `OLLAMA_HOST` is not set. |
+| `OPENROUTER_API_KEY` | OpenRouter API key. When set, OpenRouter is used (takes priority). |
+| `OLLAMA_HOST`        | Ollama base URL (e.g. `http://localhost:11434`). Used when `OPENROUTER_API_KEY` is not set. |
 | `MODEL`              | Overrides the default model for whichever provider is active. |
 
-**Priority:** Ollama > OpenRouter when both are configured.
+**Priority:** OpenRouter > Ollama when both are configured.
 
 **Default models:** `llama3.2` (Ollama) · `anthropic/claude-3-haiku` (OpenRouter)
 
@@ -110,9 +119,19 @@ A minimal CLI for testing your LLM configuration from the terminal.
 ### Build
 
 ```sh
-make build-elw        # builds ./elw in the project root
+make build            # builds both ./elw and ./elwi in the project root
+make build-elw        # builds ./elw only
 make install-elw      # installs to $(GOPATH)/bin
 ```
+
+Or install directly without cloning:
+
+```sh
+go install github.com/nealhardesty/easy-llm-wrapper/cmd/elw@latest
+go install github.com/nealhardesty/easy-llm-wrapper/cmd/elwi@latest
+```
+
+> **Note:** `go install github.com/nealhardesty/easy-llm-wrapper` will **not** install the CLI tools — the root package is the library. Use the `cmd/elw` and `cmd/elwi` paths above.
 
 ### Usage
 

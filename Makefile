@@ -3,9 +3,11 @@ BIN    := elw
 
 .PHONY: build build-elw install-elw test test-unit test-functional lint fmt tidy clean version version-increment push help
 
-## build: Compile the library and CLI tool
+## build: Compile the library and both CLI tools (elw and elwi)
 build:
 	go build ./...
+	go build -o $(BIN) ./cmd/elw
+	go build -o elwi ./cmd/elwi
 
 ## build-elw: Build the elw CLI binary into the project root
 build-elw:

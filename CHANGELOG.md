@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Provider priority reversed: `OPENROUTER_API_KEY` (OpenRouter) now takes precedence over `OLLAMA_HOST` (Ollama) when both are set
+- `make build` now builds both `elw` and `elwi` binaries in addition to compiling all packages
+- README updated to clarify correct `go install` paths for CLI tools (`cmd/elw` and `cmd/elwi`) and that the root package is a library only
+
 ### Added
 - `cmd/elw` — CLI tool for testing LLM configuration from the terminal
   - `elw <question>` sends a streaming request using auto-detected provider/model

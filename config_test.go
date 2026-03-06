@@ -44,7 +44,7 @@ func TestConfigFromEnv_OpenRouter(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnv_OllamaPriority(t *testing.T) {
+func TestConfigFromEnv_OpenRouterPriority(t *testing.T) {
 	t.Setenv(envOllamaHost, "http://localhost:11434")
 	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
 	t.Setenv(envModel, "")
@@ -53,8 +53,8 @@ func TestConfigFromEnv_OllamaPriority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Provider != ProviderOllama {
-		t.Errorf("expected Ollama to win priority, got %q", cfg.Provider)
+	if cfg.Provider != ProviderOpenRouter {
+		t.Errorf("expected OpenRouter to win priority, got %q", cfg.Provider)
 	}
 }
 

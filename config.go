@@ -44,20 +44,8 @@ func normalizeURL(u string) string {
 }
 
 // configFromEnv auto-detects provider and model from environment variables.
-// Ollama takes priority over OpenRouter when both are configured.
+// OpenRouter takes priority over Ollama when both are configured.
 func configFromEnv() (Config, error) {
-	if host := os.Getenv(envOllamaHost); host != "" {
-		model := defaultOllamaModel
-		if m := os.Getenv(envModel); m != "" {
-			model = m
-		}
-		return Config{
-			Provider: ProviderOllama,
-			Model:    model,
-			BaseURL:  normalizeURL(host),
-		}, nil
-	}
-
 	if key := os.Getenv(envOpenRouterAPIKey); key != "" {
 		model := defaultOpenRouterModel
 		if m := os.Getenv(envModel); m != "" {
@@ -71,5 +59,17 @@ func configFromEnv() (Config, error) {
 		}, nil
 	}
 
-	return Config{}, fmt.Errorf("no LLM provider configured: set %s or %s", envOllamaHost, envOpenRouterAPIKey)
+	if host := os.Getenv(envOllamaHost); host != "" {
+		model := defaultOllamaModel
+		if m := os.Getenv(envModel); m != "" {
+			model = m
+		}
+		return Config{
+			Provider: ProviderOllama,
+			Model:    model,
+			BaseURL:  normalizeURL(host),
+		}, nil
+	}
+
+	return Config{}, fmt.Errorf("no LLM provider configured: set %s or %s", envOpenRouterAPIKey, envOllamaHost)
 }
