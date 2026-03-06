@@ -34,20 +34,11 @@ func TestOpenRouterComplete_TextOnly(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(openRouterResponse{
-			Model: "anthropic/claude-3-haiku",
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{{Message: struct {
-				Content string `json:"content"`
-			}{Content: "The answer is 4."}}},
-		})
+		fmt.Fprint(w, `{"model":"anthropic/claude-3-haiku","choices":[{"message":{"content":"The answer is 4."}}]}`)
 	}))
 	defer srv.Close()
 
-	p := newOpenRouterProvider(srv.URL, "test-key")
+	p := newOpenRouterProvider(srv.URL, "test-key", nil)
 	resp, err := p.complete(context.Background(), "anthropic/claude-3-haiku", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("What is 2+2?")}}},
 	})
@@ -75,20 +66,11 @@ func TestOpenRouterComplete_WithSystem(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(openRouterResponse{
-			Model: "m",
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{{Message: struct {
-				Content string `json:"content"`
-			}{Content: "ok"}}},
-		})
+		fmt.Fprint(w, `{"model":"m","choices":[{"message":{"content":"ok"}}]}`)
 	}))
 	defer srv.Close()
 
-	p := newOpenRouterProvider(srv.URL, "k")
+	p := newOpenRouterProvider(srv.URL, "k", nil)
 	_, err := p.complete(context.Background(), "m", Request{
 		System:   "You are helpful.",
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}},
@@ -116,20 +98,11 @@ func TestOpenRouterComplete_MultiModal(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(openRouterResponse{
-			Model: "m",
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{{Message: struct {
-				Content string `json:"content"`
-			}{Content: "a dog"}}},
-		})
+		fmt.Fprint(w, `{"model":"m","choices":[{"message":{"content":"a dog"}}]}`)
 	}))
 	defer srv.Close()
 
-	p := newOpenRouterProvider(srv.URL, "k")
+	p := newOpenRouterProvider(srv.URL, "k", nil)
 	_, err := p.complete(context.Background(), "m", Request{
 		Messages: []Message{{
 			Role: RoleUser,
@@ -150,7 +123,7 @@ func TestOpenRouterComplete_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOpenRouterProvider(srv.URL, "bad-key")
+	p := newOpenRouterProvider(srv.URL, "bad-key", nil)
 	_, err := p.complete(context.Background(), "m", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}},
 	})
@@ -192,7 +165,7 @@ func TestOpenRouterStream_Basic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOpenRouterProvider(srv.URL, "k")
+	p := newOpenRouterProvider(srv.URL, "k", nil)
 	sr, err := p.stream(context.Background(), "m", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("Hi")}}},
 	})
@@ -219,7 +192,7 @@ func TestOpenRouterStream_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOpenRouterProvider(srv.URL, "k")
+	p := newOpenRouterProvider(srv.URL, "k", nil)
 	_, err := p.stream(context.Background(), "m", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}},
 	})
@@ -282,6 +255,145 @@ func TestParseOpenRouterChunk_InvalidJSON(t *testing.T) {
 	_, _, err := parseOpenRouterChunk([]byte("data: not-json"))
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// parseOpenRouterResponseContent tests
+
+func TestParseOpenRouterResponseContent_String(t *testing.T) {
+	raw := json.RawMessage(`"Hello, world!"`)
+	text, images, err := parseOpenRouterResponseContent(raw)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if text != "Hello, world!" {
+		t.Errorf("text = %q, want %q", text, "Hello, world!")
+	}
+	if len(images) != 0 {
+		t.Errorf("images = %d, want 0", len(images))
+	}
+}
+
+func TestParseOpenRouterResponseContent_TextArray(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"text","text":"Hello"},{"type":"text","text":" world"}]`)
+	text, images, err := parseOpenRouterResponseContent(raw)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if text != "Hello world" {
+		t.Errorf("text = %q, want %q", text, "Hello world")
+	}
+	if len(images) != 0 {
+		t.Errorf("images = %d, want 0", len(images))
+	}
+}
+
+func TestParseOpenRouterResponseContent_ImageArray(t *testing.T) {
+	// 1x1 transparent PNG base64
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	raw := json.RawMessage(`[` +
+		`{"type":"text","text":"Here is your image:"},` +
+		`{"type":"image_url","image_url":{"url":"data:image/png;base64,` + pngB64 + `"}}` +
+		`]`)
+	text, images, err := parseOpenRouterResponseContent(raw)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if text != "Here is your image:" {
+		t.Errorf("text = %q, want %q", text, "Here is your image:")
+	}
+	if len(images) != 1 {
+		t.Fatalf("images = %d, want 1", len(images))
+	}
+	if images[0].MIMEType != "image/png" {
+		t.Errorf("MIMEType = %q, want image/png", images[0].MIMEType)
+	}
+	if len(images[0].Data) == 0 {
+		t.Error("image data is empty")
+	}
+}
+
+func TestParseOpenRouterResponseContent_InvalidJSON(t *testing.T) {
+	_, _, err := parseOpenRouterResponseContent(json.RawMessage(`{bad}`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// parseDataURI tests
+
+func TestParseDataURI_PNG(t *testing.T) {
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	mimeType, data, err := parseDataURI("data:image/png;base64," + pngB64)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if mimeType != "image/png" {
+		t.Errorf("mimeType = %q, want image/png", mimeType)
+	}
+	if len(data) == 0 {
+		t.Error("data is empty")
+	}
+}
+
+func TestParseDataURI_NotDataURI(t *testing.T) {
+	_, _, err := parseDataURI("https://example.com/image.png")
+	if err == nil {
+		t.Fatal("expected error for non-data URI")
+	}
+}
+
+func TestParseDataURI_NoBase64(t *testing.T) {
+	_, _, err := parseDataURI("data:image/png,rawdata")
+	if err == nil {
+		t.Fatal("expected error for non-base64 data URI")
+	}
+}
+
+func TestParseDataURI_MissingComma(t *testing.T) {
+	_, _, err := parseDataURI("data:image/png;base64")
+	if err == nil {
+		t.Fatal("expected error for missing comma")
+	}
+}
+
+// TestOpenRouterComplete_ImageResponse tests that image data in a response is
+// correctly decoded and returned in Response.Images.
+func TestOpenRouterComplete_ImageResponse(t *testing.T) {
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := `{
+			"model": "google/gemini-flash-image",
+			"choices": [{
+				"message": {
+					"content": [
+						{"type": "text", "text": "Here is your image:"},
+						{"type": "image_url", "image_url": {"url": "data:image/png;base64,` + pngB64 + `"}}
+					]
+				}
+			}]
+		}`
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	p := newOpenRouterProvider(srv.URL, "k", nil)
+	resp, err := p.complete(context.Background(), "google/gemini-flash-image", Request{
+		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("Generate an image")}}},
+	})
+	if err != nil {
+		t.Fatalf("complete() error: %v", err)
+	}
+	if resp.Text != "Here is your image:" {
+		t.Errorf("Text = %q, want %q", resp.Text, "Here is your image:")
+	}
+	if len(resp.Images) != 1 {
+		t.Fatalf("Images = %d, want 1", len(resp.Images))
+	}
+	if resp.Images[0].MIMEType != "image/png" {
+		t.Errorf("MIMEType = %q, want image/png", resp.Images[0].MIMEType)
 	}
 }
 

@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	elw [flags] <question>
+//	elw [flags] [question]
 //
 // Provider and model are selected from environment variables (see README).
 package main
@@ -23,6 +23,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.BoolVar(showVersion, "v", false, "print version and exit (shorthand)")
 	debug := flag.Bool("d", false, "enable debug output (provider, model, timing, env)")
+	system := flag.String("s", "", "system prompt")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: elw [flags] [question]\n\n")
@@ -30,6 +31,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "If no question is given as an argument, the prompt is read from stdin.\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  elw What is the capital of France?\n")
+		fmt.Fprintf(os.Stderr, "  elw -s 'You are a poet.' Write a haiku about Go.\n")
 		fmt.Fprintf(os.Stderr, "  echo 'Explain goroutines' | elw\n")
 		fmt.Fprintf(os.Stderr, "  cat prompt.txt | elw\n\n")
 		fmt.Fprintf(os.Stderr, "Environment variables:\n")
@@ -54,7 +56,6 @@ func main() {
 	if flag.NArg() > 0 {
 		question = strings.Join(flag.Args(), " ")
 	} else {
-		// No args: read prompt from stdin.
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
@@ -72,6 +73,7 @@ func main() {
 		debugf("OLLAMA_HOST        = %q", os.Getenv("OLLAMA_HOST"))
 		debugf("OPENROUTER_API_KEY = %q", mask(os.Getenv("OPENROUTER_API_KEY")))
 		debugf("MODEL              = %q", os.Getenv("MODEL"))
+		debugf("system             = %q", *system)
 		debugf("question           = %q", question)
 	}
 
@@ -91,6 +93,7 @@ func main() {
 	start := time.Now()
 
 	stream, err := client.Stream(context.Background(), llm.Request{
+		System: *system,
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Parts: []llm.Part{llm.TextPart(question)}},
 		},

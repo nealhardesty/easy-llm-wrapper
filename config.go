@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -27,10 +28,11 @@ const (
 // Config holds explicit provider configuration. Used with NewClientWithConfig
 // to bypass environment-based auto-detection.
 type Config struct {
-	Provider ProviderType
-	Model    string
-	BaseURL  string // Ollama: OLLAMA_HOST value; OpenRouter: API base URL
-	APIKey   string // OpenRouter only
+	Provider  ProviderType
+	Model     string
+	BaseURL   string            // Ollama: OLLAMA_HOST value; OpenRouter: API base URL
+	APIKey    string            // OpenRouter only
+	Transport http.RoundTripper // optional; uses http.DefaultTransport when nil
 }
 
 // normalizeURL ensures the URL has an http:// scheme if none is present.

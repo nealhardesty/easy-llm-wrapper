@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,11 +17,11 @@ type openRouterProvider struct {
 	client  *http.Client
 }
 
-func newOpenRouterProvider(baseURL, apiKey string) *openRouterProvider {
+func newOpenRouterProvider(baseURL, apiKey string, transport http.RoundTripper) *openRouterProvider {
 	return &openRouterProvider{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		client:  &http.Client{},
+		client:  &http.Client{Transport: transport},
 	}
 }
 
@@ -53,7 +54,13 @@ type openRouterResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			// Content is a plain string for text responses or a JSON array of
+			// content parts for multi-modal responses (text + images).
+			Content json.RawMessage `json:"content"`
+			// Images holds generated images returned by image-generation models
+			// (e.g. google/gemini-*-image-*). OpenRouter places them here rather
+			// than inside Content.
+			Images []openRouterContentPart `json:"images"`
 		} `json:"message"`
 	} `json:"choices"`
 }
@@ -150,7 +157,24 @@ func (o *openRouterProvider) complete(ctx context.Context, model string, req Req
 		return nil, fmt.Errorf("openrouter: no choices in response")
 	}
 
-	return &Response{Text: result.Choices[0].Message.Content, Model: result.Model}, nil
+	text, images, err := parseOpenRouterResponseContent(result.Choices[0].Message.Content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Image-generation models (e.g. gemini-*-image-*) return images in
+	// message.images rather than inside message.content.
+	for _, p := range result.Choices[0].Message.Images {
+		if p.Type == "image_url" {
+			mimeType, data, parseErr := parseDataURI(p.ImageURL.URL)
+			if parseErr != nil {
+				return nil, fmt.Errorf("openrouter: parse image in message.images: %w", parseErr)
+			}
+			images = append(images, ImagePart(mimeType, data))
+		}
+	}
+
+	return &Response{Text: text, Model: result.Model, Images: images}, nil
 }
 
 func (o *openRouterProvider) stream(ctx context.Context, model string, req Request) (*StreamResponse, error) {
@@ -164,6 +188,71 @@ func (o *openRouterProvider) stream(ctx context.Context, model string, req Reque
 	}
 
 	return newStreamResponse(resp.Body, parseOpenRouterChunk), nil
+}
+
+// parseOpenRouterResponseContent parses the content field from a non-streaming
+// OpenRouter response. Content may be a plain string or an array of typed parts
+// (text and/or image_url entries for multi-modal responses).
+func parseOpenRouterResponseContent(raw json.RawMessage) (text string, images []Part, err error) {
+	// Try plain string first (text-only response).
+	var s string
+	if jsonErr := json.Unmarshal(raw, &s); jsonErr == nil {
+		return s, nil, nil
+	}
+
+	// Array of content parts (multi-modal response).
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if jsonErr := json.Unmarshal(raw, &parts); jsonErr != nil {
+		return "", nil, fmt.Errorf("openrouter: parse response content: %w", jsonErr)
+	}
+
+	var texts []string
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			texts = append(texts, p.Text)
+		case "image_url":
+			mimeType, data, parseErr := parseDataURI(p.ImageURL.URL)
+			if parseErr != nil {
+				return "", nil, fmt.Errorf("openrouter: parse image in response: %w", parseErr)
+			}
+			images = append(images, ImagePart(mimeType, data))
+		}
+	}
+	return strings.Join(texts, ""), images, nil
+}
+
+// parseDataURI decodes a data URI of the form "data:<mime>;base64,<data>"
+// and returns the MIME type and raw bytes.
+func parseDataURI(uri string) (mimeType string, data []byte, err error) {
+	if !strings.HasPrefix(uri, "data:") {
+		return "", nil, fmt.Errorf("not a data URI")
+	}
+	rest := uri[len("data:"):]
+	comma := strings.IndexByte(rest, ',')
+	if comma < 0 {
+		return "", nil, fmt.Errorf("invalid data URI: missing comma")
+	}
+	meta := rest[:comma]
+	encoded := rest[comma+1:]
+
+	metaParts := strings.Split(meta, ";")
+	mimeType = metaParts[0]
+	if len(metaParts) < 2 || metaParts[len(metaParts)-1] != "base64" {
+		return "", nil, fmt.Errorf("only base64 data URIs are supported")
+	}
+
+	data, err = base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", nil, fmt.Errorf("decode base64 data URI: %w", err)
+	}
+	return mimeType, data, nil
 }
 
 // parseOpenRouterChunk handles the SSE "data: {...}" line format.

@@ -37,7 +37,7 @@ func TestOllamaComplete_TextOnly(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL)
+	p := newOllamaProvider(srv.URL, nil)
 	resp, err := p.complete(context.Background(), "llama3.2", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("Hi")}}},
 	})
@@ -74,7 +74,7 @@ func TestOllamaComplete_WithSystem(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL)
+	p := newOllamaProvider(srv.URL, nil)
 	_, err := p.complete(context.Background(), "llama3.2", Request{
 		System:   "Be helpful.",
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("Hi")}}},
@@ -112,7 +112,7 @@ func TestOllamaComplete_WithImages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL)
+	p := newOllamaProvider(srv.URL, nil)
 	_, err := p.complete(context.Background(), "llava", Request{
 		Messages: []Message{{
 			Role: RoleUser,
@@ -133,7 +133,7 @@ func TestOllamaComplete_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL)
+	p := newOllamaProvider(srv.URL, nil)
 	_, err := p.complete(context.Background(), "bad-model", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}},
 	})
@@ -172,7 +172,7 @@ func TestOllamaStream_Basic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL)
+	p := newOllamaProvider(srv.URL, nil)
 	sr, err := p.stream(context.Background(), "llama3.2", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("Hi")}}},
 	})
@@ -199,7 +199,7 @@ func TestOllamaStream_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL)
+	p := newOllamaProvider(srv.URL, nil)
 	_, err := p.stream(context.Background(), "m", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}},
 	})
@@ -224,7 +224,7 @@ func TestOllamaBaseURL_TrailingSlashStripped(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newOllamaProvider(srv.URL + "/") // trailing slash
+	p := newOllamaProvider(srv.URL+"/", nil) // trailing slash
 	_, err := p.complete(context.Background(), "m", Request{
 		Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}},
 	})

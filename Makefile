@@ -15,6 +15,14 @@ build-elw:
 install-elw:
 	go install ./cmd/elw
 
+## build-elwi: Build the elwi image generation CLI binary into the project root
+build-elwi:
+	go build -o elwi ./cmd/elwi
+
+## install-elwi: Install the elwi CLI to GOPATH/bin
+install-elwi:
+	go install ./cmd/elwi
+
 ## test: Run all unit tests with race detector
 test:
 	go test -race ./...
@@ -46,9 +54,9 @@ fmt:
 tidy:
 	go mod tidy
 
-## clean: Remove build artifacts and CLI binary
+## clean: Remove build artifacts and CLI binaries
 clean:
-	rm -f *.out coverage.out $(BIN)
+	rm -f *.out coverage.out $(BIN) elwi
 
 ## version: Display current version
 version:

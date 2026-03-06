@@ -47,9 +47,9 @@ func NewClientWithConfig(cfg Config) (*Client, error) {
 func newProvider(cfg Config) (provider, error) {
 	switch cfg.Provider {
 	case ProviderOllama:
-		return newOllamaProvider(cfg.BaseURL), nil
+		return newOllamaProvider(cfg.BaseURL, cfg.Transport), nil
 	case ProviderOpenRouter:
-		return newOpenRouterProvider(cfg.BaseURL, cfg.APIKey), nil
+		return newOpenRouterProvider(cfg.BaseURL, cfg.APIKey, cfg.Transport), nil
 	default:
 		return nil, fmt.Errorf("unknown provider: %q", cfg.Provider)
 	}

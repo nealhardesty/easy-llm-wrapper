@@ -15,10 +15,10 @@ type ollamaProvider struct {
 	client  *http.Client
 }
 
-func newOllamaProvider(baseURL string) *ollamaProvider {
+func newOllamaProvider(baseURL string, transport http.RoundTripper) *ollamaProvider {
 	return &ollamaProvider{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{},
+		client:  &http.Client{Transport: transport},
 	}
 }
 

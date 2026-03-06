@@ -60,6 +60,7 @@ type Request struct {
 
 // Response is the LLM's reply to a complete (non-streaming) request.
 type Response struct {
-	Text  string // generated text content
-	Model string // model that produced the response
+	Text   string // generated text content (may be empty for image-only responses)
+	Model  string // model that produced the response
+	Images []Part // generated images, if any; each Part has Type==PartTypeImage
 }
