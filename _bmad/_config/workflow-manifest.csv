@@ -1,0 +1,7 @@
+name,description,module,path
+"brainstorming","Facilitate interactive brainstorming sessions using diverse creative techniques and ideation methods. Use when the user says help me brainstorm or help me ideate.","core","_bmad/core/workflows/brainstorming/workflow.md"
+"party-mode","Orchestrates group discussions between all installed BMAD agents, enabling natural multi-agent conversations. Use when user requests party mode.","core","_bmad/core/workflows/party-mode/workflow.md"
+"design-thinking","Guide human-centered design processes using empathy-driven methodologies. Use when the user says ""lets run design thinking"" or ""I want to apply design thinking""","cis","_bmad/cis/workflows/design-thinking/workflow.yaml"
+"innovation-strategy","Identify disruption opportunities and architect business model innovation. Use when the user says ""lets create an innovation strategy"" or ""I want to find disruption opportunities""","cis","_bmad/cis/workflows/innovation-strategy/workflow.yaml"
+"problem-solving","Apply systematic problem-solving methodologies to complex challenges. Use when the user says ""guide me through structured problem solving"" or ""I want to crack this challenge with guided problem solving techniques""","cis","_bmad/cis/workflows/problem-solving/workflow.yaml"
+"storytelling","Craft compelling narratives using story frameworks. Use when the user says ""help me with storytelling"" or ""I want to create a narrative through storytelling""","cis","_bmad/cis/workflows/storytelling/workflow.yaml"
