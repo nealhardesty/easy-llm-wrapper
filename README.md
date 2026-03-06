@@ -41,7 +41,7 @@ answer, err := client.Ask(ctx, "", "What is the capital of France?")
 
 **Priority:** OpenRouter > Ollama when both are configured.
 
-**Default models:** `llama3.2` (Ollama) · `anthropic/claude-3-haiku` (OpenRouter)
+**Default models:** `gpt-oss:20b` (Ollama) · `anthropic/claude-3-haiku` (OpenRouter)
 
 ## Usage
 
@@ -152,7 +152,7 @@ cat prompt.txt | ./elw
 The provider and model are printed to stderr before the response:
 
 ```
-[ollama / llama3.2]
+[ollama / gpt-oss:20b]
 Paris is the capital of France.
 ```
 
@@ -176,7 +176,7 @@ Paris is the capital of France.
 [debug] MODEL              = ""
 [debug] question           = "What is 2+2?"
 [debug] provider = ollama
-[debug] model    = llama3.2
+[debug] model    = gpt-oss:20b
 [debug] --- response (streaming) ---
 4
 [debug] --- done ---

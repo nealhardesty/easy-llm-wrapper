@@ -20,7 +20,7 @@ const (
 	envOpenRouterAPIKey = "OPENROUTER_API_KEY"
 	envModel            = "MODEL"
 
-	defaultOllamaModel       = "llama3.2"
+	defaultOllamaModel       = "gpt-oss:20b"
 	defaultOpenRouterModel   = "anthropic/claude-3-haiku"
 	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 )
