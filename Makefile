@@ -86,7 +86,7 @@ push: fmt tidy build test
 	sed -i "s/Version = \"$$VERSION\"/Version = \"$$NEW_VERSION\"/" version.go && \
 	echo "Bumped $$VERSION → $$NEW_VERSION" && \
 	git add -A && \
-	git commit -m "release: v$$NEW_VERSION" && \
+	git commit -m "release: v$$NEW_VERSION.  $$(gitsum)" && \
 	git push && \
 	git tag v$$NEW_VERSION && \
 	git push --tags && \
