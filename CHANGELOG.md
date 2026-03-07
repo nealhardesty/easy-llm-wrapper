@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Debug logging via `LLM_DEBUG=1`: logs to stderr when `claude` binary is not found, when each provider is skipped or selected, and when exec calls fail in `claude.go`
+
+### Added
 - `ProviderClaude` — new provider that shells out to the local `claude` CLI binary
   - `claude.go`: `claudeProvider` implementing `complete` and `stream` via `exec.CommandContext`
   - Single-message prompts passed directly via `-p`; multi-turn formatted as `Human:/Assistant:` pairs

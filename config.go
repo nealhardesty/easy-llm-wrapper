@@ -8,6 +8,13 @@ import (
 	"strings"
 )
 
+// debugf writes to stderr when LLM_DEBUG=1.
+func debugf(format string, args ...any) {
+	if os.Getenv("LLM_DEBUG") == "1" {
+		fmt.Fprintf(os.Stderr, "[llm debug] "+format+"\n", args...)
+	}
+}
+
 // lookPath is a variable so tests can override it to control PATH scanning.
 var lookPath = exec.LookPath
 
@@ -51,15 +58,19 @@ func normalizeURL(u string) string {
 // configFromEnv auto-detects provider and model from environment variables.
 // Priority: claude CLI (if on PATH) > OpenRouter (if API key set) > Ollama (if host set).
 func configFromEnv() (Config, error) {
-	if _, err := lookPath("claude"); err == nil {
+	if path, err := lookPath("claude"); err == nil {
+		debugf("claude binary found at %s", path)
 		model := os.Getenv(envModel)
 		return Config{
 			Provider: ProviderClaude,
 			Model:    model,
 		}, nil
+	} else {
+		debugf("claude binary not found: %v", err)
 	}
 
 	if key := os.Getenv(envOpenRouterAPIKey); key != "" {
+		debugf("using OpenRouter (API key set)")
 		model := defaultOpenRouterModel
 		if m := os.Getenv(envModel); m != "" {
 			model = m
@@ -70,9 +81,12 @@ func configFromEnv() (Config, error) {
 			BaseURL:  defaultOpenRouterBaseURL,
 			APIKey:   key,
 		}, nil
+	} else {
+		debugf("OpenRouter skipped: %s not set", envOpenRouterAPIKey)
 	}
 
 	if host := os.Getenv(envOllamaHost); host != "" {
+		debugf("using Ollama at %s", host)
 		model := defaultOllamaModel
 		if m := os.Getenv(envModel); m != "" {
 			model = m
@@ -82,6 +96,8 @@ func configFromEnv() (Config, error) {
 			Model:    model,
 			BaseURL:  normalizeURL(host),
 		}, nil
+	} else {
+		debugf("Ollama skipped: %s not set", envOllamaHost)
 	}
 
 	return Config{}, fmt.Errorf("no LLM provider configured: install claude CLI, or set %s or %s", envOpenRouterAPIKey, envOllamaHost)
