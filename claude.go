@@ -4,23 +4,32 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
 
-type claudeProvider struct{}
+type claudeProvider struct {
+	debug bool
+}
 
-func newClaudeProvider() *claudeProvider {
-	return &claudeProvider{}
+func newClaudeProvider(debug bool) *claudeProvider {
+	return &claudeProvider{debug: debug}
+}
+
+func (p *claudeProvider) debugf(format string, args ...any) {
+	if p.debug {
+		fmt.Fprintf(os.Stderr, "[llm debug] "+format+"\n", args...)
+	}
 }
 
 func (p *claudeProvider) resolveBinary() (string, error) {
 	path, err := lookPath("claude")
 	if err != nil {
-		debugf("claude binary lookup failed: %v", err)
+		p.debugf("claude binary lookup failed: %v", err)
 		return "", fmt.Errorf("claude: binary not found in PATH: %w", err)
 	}
-	debugf("claude binary resolved to %s", path)
+	p.debugf("claude binary resolved to %s", path)
 	return path, nil
 }
 
@@ -76,11 +85,11 @@ func (p *claudeProvider) complete(ctx context.Context, model string, req Request
 	}
 
 	args := p.buildArgs(model, req, "text")
-	debugf("claude exec: %s %v", bin, args)
+	p.debugf("claude exec: %s %v", bin, args)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		debugf("claude exec failed: %v", err)
+		p.debugf("claude exec failed: %v", err)
 		return nil, fmt.Errorf("claude: run: %w", err)
 	}
 
@@ -94,15 +103,15 @@ func (p *claudeProvider) stream(ctx context.Context, model string, req Request) 
 	}
 
 	args := p.buildArgs(model, req, "text")
-	debugf("claude stream exec: %s %v", bin, args)
+	p.debugf("claude stream exec: %s %v", bin, args)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		debugf("claude stdout pipe failed: %v", err)
+		p.debugf("claude stdout pipe failed: %v", err)
 		return nil, fmt.Errorf("claude: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		debugf("claude start failed: %v", err)
+		p.debugf("claude start failed: %v", err)
 		return nil, fmt.Errorf("claude: start: %w", err)
 	}
 

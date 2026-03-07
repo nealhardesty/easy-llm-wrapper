@@ -47,7 +47,7 @@ func NewClientWithConfig(cfg Config) (*Client, error) {
 func newProvider(cfg Config) (provider, error) {
 	switch cfg.Provider {
 	case ProviderClaude:
-		return newClaudeProvider(), nil
+		return newClaudeProvider(cfg.Debug), nil
 	case ProviderOllama:
 		return newOllamaProvider(cfg.BaseURL, cfg.Transport), nil
 	case ProviderOpenRouter:

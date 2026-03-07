@@ -45,6 +45,13 @@ type Config struct {
 	BaseURL   string            // Ollama: OLLAMA_HOST value; OpenRouter: API base URL
 	APIKey    string            // OpenRouter only
 	Transport http.RoundTripper // optional; uses http.DefaultTransport when nil
+	Debug     bool              // emit debug lines to stderr
+}
+
+// ConfigFromEnv auto-detects provider and model from environment variables.
+// The returned Config can be modified (e.g. set Debug) before passing to NewClientWithConfig.
+func ConfigFromEnv() (Config, error) {
+	return configFromEnv()
 }
 
 // normalizeURL ensures the URL has an http:// scheme if none is present.

@@ -77,7 +77,13 @@ func main() {
 		debugf("question           = %q", question)
 	}
 
-	client, err := llm.NewClient()
+	cfg, err := llm.ConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	cfg.Debug = *debug
+	client, err := llm.NewClientWithConfig(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -86,8 +92,6 @@ func main() {
 	if *debug {
 		debugf("provider = %s", client.Provider())
 		debugf("model    = %s", client.Model())
-	} else {
-		fmt.Fprintf(os.Stderr, "[%s / %s]\n", client.Provider(), client.Model())
 	}
 
 	start := time.Now()
