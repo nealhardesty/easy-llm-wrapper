@@ -35,13 +35,13 @@ answer, err := client.Ask(ctx, "", "What is the capital of France?")
 
 | Variable             | Description |
 |----------------------|-------------|
-| `OPENROUTER_API_KEY` | OpenRouter API key. When set, OpenRouter is used (takes priority). |
-| `OLLAMA_HOST`        | Ollama base URL (e.g. `http://localhost:11434`). Used when `OPENROUTER_API_KEY` is not set. |
+| `OPENROUTER_API_KEY` | OpenRouter API key. Used when the `claude` CLI is not on `PATH`. |
+| `OLLAMA_HOST`        | Ollama base URL (e.g. `http://localhost:11434`). Used when neither the `claude` CLI nor `OPENROUTER_API_KEY` is available. |
 | `MODEL`              | Overrides the default model for whichever provider is active. |
 
-**Priority:** OpenRouter > Ollama when both are configured.
+**Priority:** `claude` CLI (if on `PATH`) > OpenRouter > Ollama.
 
-**Default models:** `gpt-oss:20b` (Ollama) · `anthropic/claude-3-haiku` (OpenRouter)
+**Default models:** `sonnet` (claude CLI) · `anthropic/claude-haiku-5.5` (OpenRouter) · `qwen3.8:27b` (Ollama)
 
 ## Usage
 
@@ -152,7 +152,7 @@ cat prompt.txt | ./elw
 The provider and model are printed to stderr before the response:
 
 ```
-[ollama / gpt-oss:20b]
+[ollama / qwen3.8:27b]
 Paris is the capital of France.
 ```
 
@@ -176,7 +176,7 @@ Paris is the capital of France.
 [debug] MODEL              = ""
 [debug] question           = "What is 2+2?"
 [debug] provider = ollama
-[debug] model    = gpt-oss:20b
+[debug] model    = qwen3.8:27b
 [debug] --- response (streaming) ---
 4
 [debug] --- done ---

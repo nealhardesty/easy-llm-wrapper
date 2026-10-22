@@ -32,8 +32,9 @@ const (
 	envOpenRouterAPIKey = "OPENROUTER_API_KEY"
 	envModel            = "MODEL"
 
-	defaultOllamaModel       = "gpt-oss:20b"
-	defaultOpenRouterModel   = "anthropic/claude-3-haiku"
+	defaultClaudeModel       = "sonnet" // claude CLI alias; resolves to the latest Sonnet
+	defaultOllamaModel       = "qwen3.8:27b"
+	defaultOpenRouterModel   = "anthropic/claude-haiku-5.5"
 	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 )
 
@@ -67,7 +68,10 @@ func normalizeURL(u string) string {
 func configFromEnv() (Config, error) {
 	if path, err := lookPath("claude"); err == nil {
 		debugf("claude binary found at %s", path)
-		model := os.Getenv(envModel)
+		model := defaultClaudeModel
+		if m := os.Getenv(envModel); m != "" {
+			model = m
+		}
 		return Config{
 			Provider: ProviderClaude,
 			Model:    model,

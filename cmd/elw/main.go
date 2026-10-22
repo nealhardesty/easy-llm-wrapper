@@ -41,7 +41,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  OPENROUTER_API_KEY OpenRouter API key.\n")
 		fmt.Fprintf(os.Stderr, "                     Used when OLLAMA_HOST is not set.\n")
 		fmt.Fprintf(os.Stderr, "  MODEL              Override the default model for the active provider.\n")
-		fmt.Fprintf(os.Stderr, "                     Default: llama3.2 (Ollama), anthropic/claude-3-haiku (OpenRouter).\n\n")
+		fmt.Fprintf(os.Stderr, "                     Default: sonnet (claude CLI), anthropic/claude-haiku-5.5 (OpenRouter),\n")
+		fmt.Fprintf(os.Stderr, "                     qwen3.8:27b (Ollama).\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}

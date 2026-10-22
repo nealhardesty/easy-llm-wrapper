@@ -33,6 +33,26 @@ func TestConfigFromEnv_Claude(t *testing.T) {
 	if cfg.Provider != ProviderClaude {
 		t.Errorf("provider = %q, want %q", cfg.Provider, ProviderClaude)
 	}
+	if cfg.Model != defaultClaudeModel {
+		t.Errorf("model = %q, want %q", cfg.Model, defaultClaudeModel)
+	}
+}
+
+func TestConfigFromEnv_ModelOverride_Claude(t *testing.T) {
+	orig := lookPath
+	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
+	t.Cleanup(func() { lookPath = orig })
+	t.Setenv(envOllamaHost, "")
+	t.Setenv(envOpenRouterAPIKey, "")
+	t.Setenv(envModel, "opus")
+
+	cfg, err := configFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Model != "opus" {
+		t.Errorf("model = %q, want %q", cfg.Model, "opus")
+	}
 }
 
 func TestConfigFromEnv_ClaudePriority(t *testing.T) {

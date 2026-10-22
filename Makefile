@@ -72,7 +72,7 @@ version-increment:
 	PATCH=$$(echo $$VERSION | cut -d. -f3) && \
 	NEW_PATCH=$$((PATCH + 1)) && \
 	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH" && \
-	sed -i "s/Version = \"$$VERSION\"/Version = \"$$NEW_VERSION\"/" version.go && \
+	sed -i.bak "s/Version = \"$$VERSION\"/Version = \"$$NEW_VERSION\"/" version.go && rm -f version.go.bak && \
 	echo "Bumped $$VERSION → $$NEW_VERSION"
 
 ## push: Bump patch version, run checks, commit, push, and tag
@@ -83,7 +83,7 @@ push: fmt tidy build test
 	PATCH=$$(echo $$VERSION | cut -d. -f3) && \
 	NEW_PATCH=$$((PATCH + 1)) && \
 	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH" && \
-	sed -i "s/Version = \"$$VERSION\"/Version = \"$$NEW_VERSION\"/" version.go && \
+	sed -i.bak "s/Version = \"$$VERSION\"/Version = \"$$NEW_VERSION\"/" version.go && rm -f version.go.bak && \
 	echo "Bumped $$VERSION → $$NEW_VERSION" && \
 	git add -A && \
 	git commit -m "release: v$$NEW_VERSION.  $$(gitsum)" && \

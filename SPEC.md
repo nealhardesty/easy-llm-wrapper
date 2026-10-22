@@ -26,22 +26,26 @@ A Go library providing a unified, opinionated interface for making LLM prompt qu
 ## Provider Selection Logic
 
 ```
-if OLLAMA_HOST is set:
-    use Ollama provider
-    model = OLLAMA_DEFAULT_MODEL (override with MODEL env)
+if `claude` is on PATH:
+    use Claude CLI provider
+    model = CLAUDE_DEFAULT_MODEL (override with MODEL env)
 else if OPENROUTER_API_KEY is set:
     use OpenRouter provider
     model = OPENROUTER_DEFAULT_MODEL (override with MODEL env)
+else if OLLAMA_HOST is set:
+    use Ollama provider
+    model = OLLAMA_DEFAULT_MODEL (override with MODEL env)
 else:
     return error: no provider configured
 ```
 
 ### Default Models
 
-| Provider   | Default Model              |
-|------------|---------------------------|
-| Ollama     | `llama3.2`                |
-| OpenRouter | `anthropic/claude-3-haiku` |
+| Provider   | Default Model                |
+|------------|------------------------------|
+| Claude CLI | `sonnet` (CLI alias for the latest Sonnet) |
+| OpenRouter | `anthropic/claude-haiku-5.5` |
+| Ollama     | `qwen3.8:27b`                |
 
 ---
 
@@ -321,9 +325,9 @@ Both Ollama (`/api/chat` with `"stream": true`) and OpenRouter (OpenAI-compatibl
 | Decision | Resolution |
 |----------|-----------|
 | Module path | `github.com/nealhardesty/easy-llm-wrapper` |
-| Provider priority | Ollama > OpenRouter when both env vars are present |
+| Provider priority | Claude CLI > OpenRouter > Ollama |
 | Streaming | Supported in v1 via `Stream()` + `StreamResponse` iterator |
-| Default OpenRouter model | `anthropic/claude-3-haiku` |
+| Default models | `sonnet` (Claude CLI), `anthropic/claude-haiku-5.5` (OpenRouter), `qwen3.8:27b` (Ollama) |
 
 ## Open Questions
 
