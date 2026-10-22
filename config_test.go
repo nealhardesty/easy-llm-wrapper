@@ -8,6 +8,7 @@ import (
 // stubLookPathNoClaude replaces lookPath for tests that should not find the claude binary.
 func stubLookPathNoClaude(t *testing.T) {
 	t.Helper()
+	t.Setenv(envProvider, "")
 	orig := lookPath
 	lookPath = func(name string) (string, error) {
 		if name == "claude" {
@@ -22,6 +23,7 @@ func TestConfigFromEnv_Claude(t *testing.T) {
 	orig := lookPath
 	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
 	t.Cleanup(func() { lookPath = orig })
+	t.Setenv(envProvider, "")
 	t.Setenv(envOllamaHost, "")
 	t.Setenv(envOpenRouterAPIKey, "")
 	t.Setenv(envModel, "")
@@ -42,6 +44,7 @@ func TestConfigFromEnv_ModelOverride_Claude(t *testing.T) {
 	orig := lookPath
 	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
 	t.Cleanup(func() { lookPath = orig })
+	t.Setenv(envProvider, "")
 	t.Setenv(envOllamaHost, "")
 	t.Setenv(envOpenRouterAPIKey, "")
 	t.Setenv(envModel, "opus")
@@ -59,6 +62,7 @@ func TestConfigFromEnv_ClaudePriority(t *testing.T) {
 	orig := lookPath
 	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
 	t.Cleanup(func() { lookPath = orig })
+	t.Setenv(envProvider, "")
 	t.Setenv(envOllamaHost, "http://localhost:11434")
 	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
 
@@ -195,5 +199,74 @@ func TestConfigFromEnv_NoProvider(t *testing.T) {
 	_, err := configFromEnv()
 	if err == nil {
 		t.Fatal("expected error when no provider is configured")
+	}
+}
+
+func stubLookPathWithClaude(t *testing.T) {
+	t.Helper()
+	orig := lookPath
+	lookPath = func(name string) (string, error) { return "/usr/bin/claude", nil }
+	t.Cleanup(func() { lookPath = orig })
+}
+
+func TestConfigFromEnv_ForcedProvider(t *testing.T) {
+	stubLookPathWithClaude(t)
+	t.Setenv(envOpenRouterAPIKey, "sk-test-key")
+	t.Setenv(envOllamaHost, "ollama.local:11434")
+	t.Setenv(envModel, "")
+
+	cases := []struct {
+		forced    string
+		want      ProviderType
+		wantModel string
+	}{
+		{"claude", ProviderClaude, defaultClaudeModel},
+		{"OpenRouter", ProviderOpenRouter, defaultOpenRouterModel},
+		{" ollama ", ProviderOllama, defaultOllamaModel},
+	}
+	for _, c := range cases {
+		t.Setenv(envProvider, c.forced)
+		cfg, err := configFromEnv()
+		if err != nil {
+			t.Fatalf("%s=%q: %v", envProvider, c.forced, err)
+		}
+		if cfg.Provider != c.want || cfg.Model != c.wantModel {
+			t.Errorf("%s=%q: got %s/%s, want %s/%s", envProvider, c.forced, cfg.Provider, cfg.Model, c.want, c.wantModel)
+		}
+	}
+	if cfg, _ := configFromEnv(); cfg.BaseURL != "http://ollama.local:11434" {
+		t.Errorf("ollama baseURL = %q", cfg.BaseURL)
+	}
+}
+
+func TestConfigFromEnv_ForcedProviderErrors(t *testing.T) {
+	stubLookPathNoClaude(t)
+	t.Setenv(envOpenRouterAPIKey, "")
+
+	for _, forced := range []string{"claude", "openrouter", "gpt"} {
+		t.Setenv(envProvider, forced)
+		if _, err := configFromEnv(); err == nil {
+			t.Errorf("%s=%q: expected error", envProvider, forced)
+		}
+	}
+}
+
+func TestConfigWithDefaults(t *testing.T) {
+	cases := []struct {
+		in          Config
+		wantModel   string
+		wantBaseURL string
+	}{
+		{Config{Provider: ProviderClaude}, defaultClaudeModel, ""},
+		{Config{Provider: ProviderOpenRouter}, defaultOpenRouterModel, defaultOpenRouterBaseURL},
+		{Config{Provider: ProviderOllama}, defaultOllamaModel, defaultOllamaHost},
+		{Config{Provider: ProviderOllama, Model: "m", BaseURL: "host:1"}, "m", "http://host:1"},
+	}
+	for _, c := range cases {
+		got := c.in.withDefaults()
+		if got.Model != c.wantModel || got.BaseURL != c.wantBaseURL {
+			t.Errorf("%+v.withDefaults() = model %q baseURL %q, want %q %q",
+				c.in, got.Model, got.BaseURL, c.wantModel, c.wantBaseURL)
+		}
 	}
 }

@@ -27,7 +27,8 @@ func TestOpenRouterComplete_TextOnly(t *testing.T) {
 
 		// Single text-only message should use string content.
 		if len(req.Messages) != 1 {
-			t.Fatalf("messages = %d, want 1", len(req.Messages))
+			t.Errorf("messages = %d, want 1", len(req.Messages))
+			return
 		}
 		if _, ok := req.Messages[0].Content.(string); !ok {
 			t.Errorf("single text message content should be string, got %T", req.Messages[0].Content)
@@ -56,7 +57,8 @@ func TestOpenRouterComplete_WithSystem(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&req)
 
 		if len(req.Messages) < 2 {
-			t.Fatalf("expected system + user message, got %d", len(req.Messages))
+			t.Errorf("expected system + user message, got %d", len(req.Messages))
+			return
 		}
 		if req.Messages[0].Role != "system" {
 			t.Errorf("first role = %q, want system", req.Messages[0].Role)
@@ -87,11 +89,13 @@ func TestOpenRouterComplete_MultiModal(t *testing.T) {
 
 		// Multi-part message should use array content, not string.
 		if len(req.Messages) != 1 {
-			t.Fatalf("messages = %d, want 1", len(req.Messages))
+			t.Errorf("messages = %d, want 1", len(req.Messages))
+			return
 		}
 		parts, ok := req.Messages[0].Content.([]interface{})
 		if !ok {
-			t.Fatalf("multi-modal content should be []interface{}, got %T", req.Messages[0].Content)
+			t.Errorf("multi-modal content should be []interface{}, got %T", req.Messages[0].Content)
+			return
 		}
 		if len(parts) != 2 {
 			t.Errorf("parts = %d, want 2 (image + text)", len(parts))
@@ -399,3 +403,78 @@ func TestOpenRouterComplete_ImageResponse(t *testing.T) {
 
 // Compile-time check that openRouterProvider implements provider.
 var _ provider = (*openRouterProvider)(nil)
+
+func TestOpenRouterComplete_ErrorIn200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"error":{"code":502,"message":"upstream provider failed"}}`)
+	}))
+	defer srv.Close()
+
+	p := newOpenRouterProvider(srv.URL, "k", nil)
+	_, err := p.complete(context.Background(), "m", Request{Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}}})
+	if err == nil || !strings.Contains(err.Error(), "upstream provider failed") {
+		t.Fatalf("err = %v, want upstream error message", err)
+	}
+}
+
+func TestOpenRouterComplete_ImagesAndModalities(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openRouterRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if strings.Join(req.Modalities, ",") != "image,text" {
+			t.Errorf("modalities = %v, want [image text]", req.Modalities)
+		}
+		// No content field, one malformed image entry, one valid image.
+		fmt.Fprint(w, `{"model":"img","choices":[{"message":{"images":[
+			{"type":"image_url"},
+			{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw=="}}
+		]}}]}`)
+	}))
+	defer srv.Close()
+
+	p := newOpenRouterProvider(srv.URL, "k", nil)
+	resp, err := p.complete(context.Background(), "img", Request{
+		Messages:   []Message{{Role: RoleUser, Parts: []Part{TextPart("draw")}}},
+		Modalities: []string{"image", "text"},
+	})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if resp.Text != "" || len(resp.Images) != 1 || resp.Images[0].MIMEType != "image/png" {
+		t.Fatalf("resp = %+v, want one png image and no text", resp)
+	}
+}
+
+func TestOpenRouterComplete_NonDataImageURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"x","images":[{"type":"image_url","image_url":{"url":"https://example.com/a.png"}}]}}]}`)
+	}))
+	defer srv.Close()
+
+	p := newOpenRouterProvider(srv.URL, "k", nil)
+	_, err := p.complete(context.Background(), "m", Request{Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}}})
+	if err == nil || !strings.Contains(err.Error(), "only data URIs") {
+		t.Fatalf("err = %v, want unsupported image URL error", err)
+	}
+}
+
+func TestParseOpenRouterChunk_NoSpaceAfterData(t *testing.T) {
+	text, done, err := parseOpenRouterChunk([]byte(`data:{"choices":[{"delta":{"content":"hi"}}]}`))
+	if err != nil || done || text != "hi" {
+		t.Errorf("got (%q, %v, %v), want (\"hi\", false, nil)", text, done, err)
+	}
+	if _, done, _ := parseOpenRouterChunk([]byte(`data:[DONE]`)); !done {
+		t.Error("data:[DONE] should end the stream")
+	}
+}
+
+func TestParseOpenRouterChunk_MidStreamError(t *testing.T) {
+	for _, line := range []string{
+		`data: {"error":{"message":"overloaded"},"choices":[{"delta":{"content":""},"finish_reason":"error"}]}`,
+		`data: {"choices":[{"delta":{"content":""},"finish_reason":"error"}]}`,
+	} {
+		if _, _, err := parseOpenRouterChunk([]byte(line)); err == nil {
+			t.Errorf("parseOpenRouterChunk(%s): expected error", line)
+		}
+	}
+}

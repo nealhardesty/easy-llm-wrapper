@@ -288,3 +288,23 @@ var _ provider = (*ollamaProvider)(nil)
 
 // Compile-time check that StreamResponse.Close satisfies io.Closer.
 var _ io.Closer = (*StreamResponse)(nil)
+
+func TestOllamaComplete_ErrorIn200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"error":"model 'nope' not found"}`))
+	}))
+	defer srv.Close()
+
+	p := newOllamaProvider(srv.URL, nil)
+	_, err := p.complete(context.Background(), "nope", Request{Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart("hi")}}}})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("err = %v, want Ollama error message", err)
+	}
+}
+
+func TestParseOllamaChunk_MidStreamError(t *testing.T) {
+	_, _, err := parseOllamaChunk([]byte(`{"error":"out of memory"}`))
+	if err == nil || !strings.Contains(err.Error(), "out of memory") {
+		t.Fatalf("err = %v, want out of memory", err)
+	}
+}

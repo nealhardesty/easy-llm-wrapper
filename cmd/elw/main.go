@@ -34,12 +34,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  elw -s 'You are a poet.' Write a haiku about Go.\n")
 		fmt.Fprintf(os.Stderr, "  echo 'Explain goroutines' | elw\n")
 		fmt.Fprintf(os.Stderr, "  cat prompt.txt | elw\n\n")
+		fmt.Fprintf(os.Stderr, "Provider priority: claude CLI (if on PATH) > OpenRouter > Ollama.\n\n")
 		fmt.Fprintf(os.Stderr, "Environment variables:\n")
+		fmt.Fprintf(os.Stderr, "  LLM_PROVIDER       Force a provider: claude, openrouter, or ollama.\n")
+		fmt.Fprintf(os.Stderr, "  OPENROUTER_API_KEY OpenRouter API key. Used when the claude CLI is not on PATH.\n")
 		fmt.Fprintf(os.Stderr, "  OLLAMA_HOST        Ollama base URL (e.g. http://localhost:11434).\n")
-		fmt.Fprintf(os.Stderr, "                     When set, Ollama is used as the provider.\n")
-		fmt.Fprintf(os.Stderr, "                     Ollama takes priority over OpenRouter.\n")
-		fmt.Fprintf(os.Stderr, "  OPENROUTER_API_KEY OpenRouter API key.\n")
-		fmt.Fprintf(os.Stderr, "                     Used when OLLAMA_HOST is not set.\n")
+		fmt.Fprintf(os.Stderr, "                     Used when neither of the above is available.\n")
 		fmt.Fprintf(os.Stderr, "  MODEL              Override the default model for the active provider.\n")
 		fmt.Fprintf(os.Stderr, "                     Default: sonnet (claude CLI), anthropic/claude-haiku-5.5 (OpenRouter),\n")
 		fmt.Fprintf(os.Stderr, "                     qwen3.8:27b (Ollama).\n\n")
@@ -57,6 +57,10 @@ func main() {
 	if flag.NArg() > 0 {
 		question = strings.Join(flag.Args(), " ")
 	} else {
+		if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			flag.Usage() // no args and stdin is a terminal: nothing to read
+			os.Exit(1)
+		}
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
@@ -71,6 +75,7 @@ func main() {
 
 	if *debug {
 		debugf("=== elw %s ===", llm.Version)
+		debugf("LLM_PROVIDER       = %q", os.Getenv("LLM_PROVIDER"))
 		debugf("OLLAMA_HOST        = %q", os.Getenv("OLLAMA_HOST"))
 		debugf("OPENROUTER_API_KEY = %q", mask(os.Getenv("OPENROUTER_API_KEY")))
 		debugf("MODEL              = %q", os.Getenv("MODEL"))
@@ -107,7 +112,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer stream.Close()
 
 	if *debug {
 		debugf("--- response (streaming) ---")
@@ -118,9 +122,12 @@ func main() {
 		fmt.Print(stream.Chunk())
 		chunks++
 	}
-	fmt.Println()
-
-	if err := stream.Err(); err != nil {
+	err = stream.Err()
+	stream.Close()
+	if chunks > 0 {
+		fmt.Println()
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

@@ -1,7 +1,9 @@
 MODULE := github.com/nealhardesty/easy-llm-wrapper
 BIN    := elw
 
-.PHONY: build build-elw install-elw test test-unit test-functional lint fmt tidy clean version version-increment push help
+.PHONY: help build build-elw install-elw build-elwi install-elwi test test-unit test-functional lint fmt tidy clean version version-increment push run
+
+.DEFAULT_GOAL := help
 
 ## build: Compile the library and both CLI tools (elw and elwi)
 build:
@@ -32,7 +34,7 @@ test:
 ## test-unit: Alias for test (unit tests only, no functional tag)
 test-unit: test
 
-## test-functional: Run functional/integration tests (requires OLLAMA_HOST or OPENROUTER_API_KEY)
+## test-functional: Run live tests against every available provider (claude CLI, OPENROUTER_API_KEY, OLLAMA_HOST)
 test-functional:
 	go test -race -tags functional ./...
 
@@ -75,7 +77,7 @@ version-increment:
 	sed -i.bak "s/Version = \"$$VERSION\"/Version = \"$$NEW_VERSION\"/" version.go && rm -f version.go.bak && \
 	echo "Bumped $$VERSION → $$NEW_VERSION"
 
-## push: Bump patch version, run checks, commit, push, and tag
+## push: Bump patch version, run checks, commit, push, and tag (requires gitsum)
 push: fmt tidy build test
 	@VERSION=$$(grep 'Version = ' version.go | sed 's/.*"\(.*\)".*/\1/') && \
 	MAJOR=$$(echo $$VERSION | cut -d. -f1) && \

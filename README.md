@@ -1,6 +1,6 @@
 # easy-llm-wrapper
 
-A simple, opinionated Go library for making LLM prompt queries via [Ollama](https://ollama.com) (local) or [OpenRouter](https://openrouter.ai) (cloud). Provider and model are selected automatically from environment variables.
+A simple, opinionated Go library for making LLM prompt queries via the [Claude Code](https://claude.com/claude-code) CLI, [OpenRouter](https://openrouter.ai) (cloud), or [Ollama](https://ollama.com) (local). Provider and model are selected automatically from the environment.
 
 ## Installation
 
@@ -35,13 +35,18 @@ answer, err := client.Ask(ctx, "", "What is the capital of France?")
 
 | Variable             | Description |
 |----------------------|-------------|
+| `LLM_PROVIDER`       | Force a provider: `claude`, `openrouter`, or `ollama`. Overrides auto-detection. |
 | `OPENROUTER_API_KEY` | OpenRouter API key. Used when the `claude` CLI is not on `PATH`. |
 | `OLLAMA_HOST`        | Ollama base URL (e.g. `http://localhost:11434`). Used when neither the `claude` CLI nor `OPENROUTER_API_KEY` is available. |
 | `MODEL`              | Overrides the default model for whichever provider is active. |
+| `LLM_DEBUG`          | Set to `1` to log provider detection to stderr. |
 
 **Priority:** `claude` CLI (if on `PATH`) > OpenRouter > Ollama.
 
 **Default models:** `sonnet` (claude CLI) · `anthropic/claude-haiku-5.5` (OpenRouter) · `qwen3.8:27b` (Ollama)
+
+All three providers support system prompts, multi-turn messages, image input, and streaming.
+The claude provider runs `claude -p` as a plain LLM call (no tools or MCP servers); you must be logged in to the CLI.
 
 ## Usage
 
@@ -106,10 +111,19 @@ if err := stream.Err(); err != nil {
 ```go
 client, err := llm.NewClientWithConfig(llm.Config{
     Provider: llm.ProviderOpenRouter,
-    Model:    "openai/gpt-4o",
-    BaseURL:  "https://openrouter.ai/api/v1",
-    APIKey:   os.Getenv("OPENROUTER_API_KEY"),
+    Model:    "openai/gpt-4o",               // empty = provider default
+    APIKey:   os.Getenv("OPENROUTER_API_KEY"), // BaseURL defaults to OpenRouter's API
 })
+```
+
+### Image generation (OpenRouter)
+
+```go
+resp, err := client.Complete(ctx, llm.Request{
+    Messages:   []llm.Message{{Role: llm.RoleUser, Parts: []llm.Part{llm.TextPart("A red balloon")}}},
+    Modalities: []string{"image", "text"},
+})
+// resp.Images[i].MIMEType / resp.Images[i].Data
 ```
 
 ## elw — Command Line Tool
@@ -149,17 +163,13 @@ echo "Summarise this:" | ./elw
 cat prompt.txt | ./elw
 ```
 
-The provider and model are printed to stderr before the response:
-
-```
-[ollama / qwen3.8:27b]
-Paris is the capital of France.
-```
+Only the response goes to stdout; errors go to stderr with exit status 1. Use `-d` to see which provider and model were chosen.
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
+| `-s` | System prompt |
 | `-v`, `--version` | Print version and exit |
 | `-d` | Debug mode: prints env vars, provider selection, chunk count, and elapsed time |
 
@@ -170,10 +180,12 @@ Paris is the capital of France.
 ```
 
 ```
-[debug] === elw 0.1.0 ===
+[debug] === elw 0.1.14 ===
+[debug] LLM_PROVIDER       = ""
 [debug] OLLAMA_HOST        = "http://localhost:11434"
 [debug] OPENROUTER_API_KEY = ""
 [debug] MODEL              = ""
+[debug] system             = ""
 [debug] question           = "What is 2+2?"
 [debug] provider = ollama
 [debug] model    = qwen3.8:27b
@@ -186,18 +198,39 @@ Paris is the capital of France.
 
 API keys are masked in debug output (first 4 chars shown).
 
+## elwi — Image Generation Tool
+
+Generates images from a text prompt via OpenRouter (requires `OPENROUTER_API_KEY`). Default model: `google/gemini-3.1-flash-image`.
+
+```sh
+elwi A photorealistic cat wearing a top hat        # → output.png
+elwi -o cat -model google/gemini-3-pro-image A cat # → cat.png
+echo 'A red balloon' | elwi -f                     # overwrite existing output.*
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o` | Output file base name; the extension comes from the image type (default `output`) |
+| `-f` | Overwrite existing output files (otherwise elwi refuses before calling the API) |
+| `-model` | Image model (default `google/gemini-3.1-flash-image`; `MODEL` env also works) |
+| `-s` | System prompt |
+| `-d` | Debug: dumps HTTP traffic (API key masked, bodies truncated) |
+| `-v`, `--version` | Print version and exit |
+
 ## Development
 
 ```sh
-make build          # compile
-make test           # unit tests (race detector on)
-make test-functional # integration tests (requires real env vars)
-make lint           # go vet + golangci-lint
-make fmt            # gofmt + goimports
-make tidy           # go mod tidy
-make version        # show current version
-make push           # bump patch, commit, push, tag
-make help           # list all targets
+make                 # list all targets (same as make help)
+make build           # compile library, elw, and elwi
+make run ARGS="..."  # build and run elw
+make test            # unit tests (race detector on)
+make test-functional # live tests against every available provider
+make lint            # go vet + golangci-lint
+make fmt             # gofmt + goimports
+make tidy            # go mod tidy
+make version         # show current version
+make version-increment # bump the patch version only
+make push            # bump patch, test, commit, push, tag (needs `gitsum` on PATH)
 ```
 
 ## License

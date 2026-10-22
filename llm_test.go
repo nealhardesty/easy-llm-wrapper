@@ -164,18 +164,12 @@ func TestImagePart(t *testing.T) {
 }
 
 func TestStreamResponse_Basic(t *testing.T) {
-	chunks := "chunk1\nchunk2\nchunk3\n"
-	body := io.NopCloser(strings.NewReader(chunks))
-
-	idx := 0
-	lines := []string{"chunk1", "chunk2", "chunk3"}
+	body := io.NopCloser(strings.NewReader("chunk1\n\n  chunk2  \nchunk3\nDONE\nafter\n"))
 	sr := newStreamResponse(body, func(line []byte) (string, bool, error) {
-		if idx >= len(lines) {
+		if string(line) == "DONE" {
 			return "", true, nil
 		}
-		s := lines[idx]
-		idx++
-		return s, false, nil
+		return "<" + string(line) + ">", false, nil
 	})
 	defer sr.Close()
 
@@ -186,12 +180,64 @@ func TestStreamResponse_Basic(t *testing.T) {
 	if sr.Err() != nil {
 		t.Fatalf("Err() = %v", sr.Err())
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d chunks, want 3", len(got))
+	want := []string{"<chunk1>", "<chunk2>", "<chunk3>"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("chunks = %q, want %q", got, want)
 	}
-	for i, want := range lines {
-		if got[i] != want {
-			t.Errorf("chunk[%d] = %q, want %q", i, got[i], want)
+	if sr.Next() {
+		t.Error("Next() after done marker should stay false")
+	}
+}
+
+func TestStreamResponse_LongLine(t *testing.T) {
+	long := strings.Repeat("x", 1<<20) // well past bufio.Scanner's 64 KB default
+	body := io.NopCloser(strings.NewReader(long + "\n"))
+	sr := newStreamResponse(body, func(line []byte) (string, bool, error) {
+		return string(line), false, nil
+	})
+	defer sr.Close()
+
+	if !sr.Next() {
+		t.Fatalf("Next() = false, Err() = %v", sr.Err())
+	}
+	if len(sr.Chunk()) != len(long) {
+		t.Errorf("chunk length = %d, want %d", len(sr.Chunk()), len(long))
+	}
+}
+
+func TestStreamResponse_AtEOF(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("a\n"))
+	sr := newStreamResponse(body, func(line []byte) (string, bool, error) {
+		return string(line), false, nil
+	})
+	sr.atEOF = func() error { return errors.New("truncated") }
+	defer sr.Close()
+
+	for sr.Next() {
+	}
+	if sr.Err() == nil || sr.Err().Error() != "truncated" {
+		t.Errorf("Err() = %v, want truncated", sr.Err())
+	}
+}
+
+func TestStreamResponse_ParseErrorStops(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("a\nbad\nc\n"))
+	sr := newStreamResponse(body, func(line []byte) (string, bool, error) {
+		if string(line) == "bad" {
+			return "", false, errors.New("boom")
 		}
+		return string(line), false, nil
+	})
+	defer sr.Close()
+
+	n := 0
+	for sr.Next() {
+		n++
+	}
+	if n != 1 || sr.Err() == nil {
+		t.Errorf("chunks = %d, Err() = %v; want 1 chunk then boom", n, sr.Err())
+	}
+	if sr.Next() {
+		t.Error("Next() after error should stay false")
 	}
 }

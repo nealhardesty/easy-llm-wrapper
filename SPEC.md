@@ -1,51 +1,69 @@
-# easy-llm-wrapper — Design Document
+# easy-llm-wrapper — Specification
 
 ## Overview
 
-A Go library providing a unified, opinionated interface for making LLM prompt queries across multiple backends (Ollama and OpenRouter). Designed for reuse across personal projects with zero-config ergonomics — the right provider and model are selected automatically from the environment.
+A Go library providing a unified, opinionated interface for making LLM prompt
+queries across three backends — the **Claude Code CLI**, **OpenRouter**
+(cloud), and **Ollama** (local). Designed for reuse across personal projects
+with zero-config ergonomics: the right provider and model are selected
+automatically from the environment.
+
+Two CLIs ship with the library: `elw` (text prompts, streamed) and `elwi`
+(image generation via OpenRouter).
 
 ---
 
 ## Requirements
 
-| # | Requirement |
-|---|-------------|
-| R1 | Support Ollama (local) as a backend |
-| R2 | Support OpenRouter (cloud) as a backend |
-| R3 | Auto-select Ollama if `OLLAMA_HOST` env var is present |
-| R4 | Auto-select OpenRouter if `OPENROUTER_API_KEY` env var is present |
-| R5 | Ollama takes precedence over OpenRouter when both are configured |
-| R6 | `MODEL` env var overrides the selected model |
-| R7 | Each provider has a sensible hardcoded default model |
-| R8 | Support system prompts |
-| R9 | Support user prompts |
-| R10 | Support multi-modal input (text + images) |
+| #   | Requirement |
+|-----|-------------|
+| R1  | Support the Claude Code CLI (`claude`) as a backend |
+| R2  | Support OpenRouter (cloud) as a backend |
+| R3  | Support Ollama (local) as a backend |
+| R4  | Auto-select a provider: claude CLI on `PATH` > `OPENROUTER_API_KEY` > `OLLAMA_HOST` |
+| R5  | `LLM_PROVIDER` forces a specific provider, overriding auto-detection |
+| R6  | `MODEL` env var overrides the selected provider's default model |
+| R7  | Each provider has a sensible hardcoded default model |
+| R8  | Support system prompts |
+| R9  | Support user prompts and multi-turn message history |
+| R10 | Support multi-modal input (text + images) on every provider |
+| R11 | Support streaming on every provider, preserving whitespace exactly |
+| R12 | Provider errors (including ones reported mid-stream or with HTTP 200) surface as Go errors, never as silent empty/truncated output |
 
 ---
 
 ## Provider Selection Logic
 
 ```
-if `claude` is on PATH:
+if LLM_PROVIDER is set (claude | openrouter | ollama, case-insensitive):
+    use that provider, or error if its prerequisite is missing
+    (claude: binary on PATH; openrouter: OPENROUTER_API_KEY; ollama: none,
+     OLLAMA_HOST defaults to http://localhost:11434)
+else if `claude` is on PATH:
     use Claude CLI provider
-    model = CLAUDE_DEFAULT_MODEL (override with MODEL env)
 else if OPENROUTER_API_KEY is set:
     use OpenRouter provider
-    model = OPENROUTER_DEFAULT_MODEL (override with MODEL env)
 else if OLLAMA_HOST is set:
     use Ollama provider
-    model = OLLAMA_DEFAULT_MODEL (override with MODEL env)
 else:
     return error: no provider configured
+
+model = MODEL env, else the provider default
 ```
 
-### Default Models
+`LLM_DEBUG=1` logs each detection step to stderr.
 
-| Provider   | Default Model                |
-|------------|------------------------------|
-| Claude CLI | `sonnet` (CLI alias for the latest Sonnet) |
-| OpenRouter | `anthropic/claude-haiku-5.5` |
-| Ollama     | `qwen3.8:27b`                |
+### Defaults
+
+| Provider   | Default model                | Default base URL               |
+|------------|------------------------------|--------------------------------|
+| Claude CLI | `sonnet` (CLI alias → latest Sonnet) | n/a                    |
+| OpenRouter | `anthropic/claude-haiku-5.5` | `https://openrouter.ai/api/v1` |
+| Ollama     | `qwen3.8:27b`                | `http://localhost:11434`       |
+| `elwi`     | `google/gemini-3.1-flash-image` (OpenRouter) | —              |
+
+`NewClientWithConfig` applies the same defaults to any empty `Model` /
+`BaseURL`, and adds `http://` to an Ollama `BaseURL` with no scheme.
 
 ---
 
@@ -53,270 +71,162 @@ else:
 
 ```
 easy-llm-wrapper/
-├── llm.go           # Public API: Client, NewClient, Request, Response types
-├── provider.go      # Provider interface
-├── config.go        # Environment-based configuration and auto-detection
-├── version.go       # Semantic version constant
-├── internal/
-│   ├── ollama/
-│   │   └── ollama.go    # Ollama HTTP client implementation
-│   └── openrouter/
-│       └── openrouter.go # OpenRouter HTTP client implementation
-├── go.mod
-├── Makefile
-└── README.md
+├── llm.go           # Client, NewClient, NewClientWithConfig, Complete/Ask/Stream
+├── types.go         # Request, Message, Part, Response, Role, PartType
+├── config.go        # Config, ConfigFromEnv, env detection, defaults
+├── provider.go      # internal provider interface
+├── stream.go        # StreamResponse (line-oriented iterator shared by all providers)
+├── claude.go        # Claude Code CLI provider (subprocess, stream-json)
+├── openrouter.go    # OpenRouter provider (OpenAI-compatible HTTP + SSE)
+├── ollama.go        # Ollama provider (/api/chat + NDJSON)
+├── version.go       # Version constant
+├── functional_test.go  # live tests (build tag `functional`)
+└── cmd/
+    ├── elw/         # text CLI (streams the reply)
+    └── elwi/        # image-generation CLI (OpenRouter only)
 ```
 
 ---
 
-## API Design
+## API
 
-### Core Types
+### Client & config
 
 ```go
-// Client is the main entry point. Created once, reused across calls.
-type Client struct { ... }
+func NewClient() (*Client, error)                    // detect from environment
+func NewClientWithConfig(cfg Config) (*Client, error) // explicit; empty fields get defaults
+func ConfigFromEnv() (Config, error)                  // inspect/modify before NewClientWithConfig
 
-// NewClient auto-detects provider and model from environment.
-// Returns an error if no provider can be configured.
-func NewClient() (*Client, error)
-
-// NewClientWithConfig creates a client with explicit configuration,
-// bypassing environment detection. Useful for testing or overrides.
-func NewClientWithConfig(cfg Config) (*Client, error)
-
-// Config holds explicit provider configuration.
 type Config struct {
-    Provider  ProviderType // ProviderOllama or ProviderOpenRouter
+    Provider  ProviderType      // ProviderClaude | ProviderOpenRouter | ProviderOllama
     Model     string
-    BaseURL   string       // Ollama: OLLAMA_HOST, OpenRouter: hardcoded
-    APIKey    string       // OpenRouter only
+    BaseURL   string            // Ollama host or OpenRouter API base
+    APIKey    string            // OpenRouter only
+    Transport http.RoundTripper // optional (HTTP providers)
+    Debug     bool              // claude provider: log exec details to stderr
 }
 
-type ProviderType string
-
-const (
-    ProviderOllama     ProviderType = "ollama"
-    ProviderOpenRouter ProviderType = "openrouter"
-)
-```
-
-### Request & Response
-
-```go
-// Request represents a prompt request to the LLM.
-type Request struct {
-    // System sets the system prompt. Optional.
-    System string
-
-    // Messages is the conversation. Typically one user message
-    // for single-turn use, or multiple for multi-turn.
-    Messages []Message
-}
-
-// Message is a single turn in the conversation.
-type Message struct {
-    Role    Role      // RoleUser or RoleAssistant
-    Parts   []Part    // One or more content parts (text, image)
-}
-
-type Role string
-
-const (
-    RoleUser      Role = "user"
-    RoleAssistant Role = "assistant"
-)
-
-// Part is a single piece of content within a message.
-// Use TextPart() or ImagePart() constructors.
-type Part struct {
-    Type     PartType
-    Text     string     // valid when Type == PartTypeText
-    MIMEType string     // valid when Type == PartTypeImage (e.g. "image/png")
-    Data     []byte     // raw image bytes when Type == PartTypeImage
-}
-
-type PartType string
-
-const (
-    PartTypeText  PartType = "text"
-    PartTypeImage PartType = "image"
-)
-
-// Constructors for convenience
-func TextPart(text string) Part
-func ImagePart(mimeType string, data []byte) Part
-
-// Response is the LLM's reply.
-type Response struct {
-    Text  string // The generated text content
-    Model string // The model that was used
-}
-```
-
-### Client Methods
-
-```go
-// Complete sends a request and returns the full response.
-func (c *Client) Complete(ctx context.Context, req Request) (*Response, error)
-
-// Ask is a convenience wrapper for simple single-turn text queries.
-// system may be empty. Returns only the response text.
-func (c *Client) Ask(ctx context.Context, system, user string) (string, error)
-
-// Stream sends a request and returns a StreamResponse for incremental reading.
-func (c *Client) Stream(ctx context.Context, req Request) (*StreamResponse, error)
-
-// Provider returns which backend is active.
+func (c *Client) Complete(ctx, Request) (*Response, error)
+func (c *Client) Ask(ctx, system, user string) (string, error)
+func (c *Client) Stream(ctx, Request) (*StreamResponse, error)
 func (c *Client) Provider() ProviderType
-
-// Model returns the model currently configured.
 func (c *Client) Model() string
 ```
 
-### Ask example
+### Request & response
 
 ```go
-answer, err := client.Ask(ctx, "You are a helpful assistant.", "What is 2+2?")
+type Request struct {
+    System     string     // optional system prompt
+    Messages   []Message  // conversation; usually one user message
+    Modalities []string   // OpenRouter only, e.g. {"image","text"} for image models
+}
 
-// system prompt is optional
-answer, err := client.Ask(ctx, "", "Summarize this for me: ...")
+type Message struct { Role Role; Parts []Part }   // RoleUser | RoleAssistant
+type Part struct {
+    Type     PartType // PartTypeText | PartTypeImage
+    Text     string
+    MIMEType string
+    Data     []byte   // raw image bytes
+}
+func TextPart(text string) Part
+func ImagePart(mimeType string, data []byte) Part
+
+type Response struct {
+    Text   string
+    Model  string  // model reported by the provider
+    Images []Part  // generated images (OpenRouter image models)
+}
 ```
+
+### Streaming
+
+`StreamResponse` mirrors `bufio.Scanner`: loop on `Next()`, read `Chunk()`,
+check `Err()` after the loop, and always `Close()`.
+
+- Lines up to 16 MB are accepted (base64 payloads exceed the 64 KB default).
+- Once `Next()` returns false it stays false.
+- A provider may install an end-of-stream check (`atEOF`) so that a stream
+  that ends without its completion marker is an error, not a silent truncation.
+- `Close()` on a claude stream kills the subprocess if it is still running, so
+  abandoning a stream returns immediately.
 
 ---
 
-## Internal Provider Interface
+## Provider Details
 
-```go
-// provider is the internal interface both backends implement.
-type provider interface {
-    complete(ctx context.Context, model string, req Request) (*Response, error)
-}
+### Claude Code CLI (`claude.go`)
+
+Invocation (verified against Claude Code 2.1.308):
+
+```
+claude -p --input-format stream-json --output-format stream-json --verbose \
+       --include-partial-messages --tools "" --strict-mcp-config \
+       --no-session-persistence [--system-prompt S] [--model M]
 ```
 
-Both `internal/ollama` and `internal/openrouter` implement this interface. The public `Client` wraps a `provider` and holds the resolved model name.
+- **Input** is one stream-json line on stdin:
+  `{"type":"user","message":{"role":"user","content":[{"type":"text",...},{"type":"image","source":{"type":"base64","media_type":...,"data":...}}]}}`.
+  Using stdin (not argv) means prompts may start with `-`, can be larger than
+  the OS argv limit, and don't show up in `ps`. Multi-turn history is
+  flattened into a `Human:`/`Assistant:` transcript in the text block; every
+  image from the conversation follows it.
+- **Output** is one JSON event per line. The provider reads:
+  - `{"type":"system","subtype":"init","model":...}` → `Response.Model`
+  - `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":...}}}` → chunks
+  - `{"type":"result","is_error":bool,"result":...}` → end of stream; when
+    `is_error` is true, `result` holds the human-readable error (e.g. an
+    unknown model) and becomes the Go error.
+- `--output-format text` is **not** used: it emits nothing until the end (no
+  real streaming), and the line-based reader would strip its newlines.
+- `--verbose` is required by the CLI for stream-json output in print mode.
+- `--include-partial-messages` only works with `--output-format stream-json`.
+- `--tools ""` and `--strict-mcp-config` make this a plain LLM call rather
+  than an agent session. `--system-prompt` *replaces* Claude Code's system
+  prompt when `System` is set; otherwise the CLI default applies.
+- If the process exits non-zero before a result, the error includes the last
+  line of stderr; on context cancellation it wraps `ctx.Err()`.
+
+### OpenRouter (`openrouter.go`)
+
+- `POST {BaseURL}/chat/completions`, OpenAI format, `Authorization: Bearer`.
+- A single text-only part is sent as string `content` (widest compatibility);
+  anything else as a content-part array with images as base64 data URLs.
+- `Request.Modalities` is sent as `"modalities"`; image generation requires
+  `["image","text"]`.
+- Generated images arrive in `message.images` (Gemini image models) or inside
+  `message.content` parts. Only `data:` URIs are supported; any other URL is
+  an explicit error. Entries without an `image_url` are skipped. Absent or
+  `null` content is treated as empty text.
+- Errors: non-200 status, a top-level `"error"` object in a 200 body, and
+  mid-stream `"error"` events / `finish_reason: "error"` all become Go errors.
+- SSE: `data:` with or without a following space; `data: [DONE]` ends the
+  stream; other SSE fields/comments are ignored.
+
+### Ollama (`ollama.go`)
+
+- `POST {BaseURL}/api/chat`; images go in `messages[].images` as bare base64.
+- Streaming is NDJSON (one JSON object per line, not SSE); `"done": true`
+  ends it.
+- An `"error"` field (in a 200 response or mid-stream) becomes a Go error.
 
 ---
 
-## Usage Examples
+## CLIs
 
-### Simplest case (zero config)
+### elw
 
-```go
-client, err := llm.NewClient()
-if err != nil {
-    log.Fatal(err) // no provider configured in environment
-}
+`elw [-s system] [-d] [question...]` — streams the reply to stdout. Reads the
+prompt from stdin when no args are given; prints usage instead of blocking
+when stdin is a terminal. Exits 1 on any error (including mid-stream).
 
-resp, err := client.Complete(ctx, llm.Request{
-    System: "You are a helpful assistant.",
-    Messages: []llm.Message{
-        {Role: llm.RoleUser, Parts: []llm.Part{llm.TextPart("What is 2+2?")}},
-    },
-})
-```
+### elwi
 
-### Multi-modal (image + text)
-
-```go
-imageBytes, _ := os.ReadFile("screenshot.png")
-
-resp, err := client.Complete(ctx, llm.Request{
-    Messages: []llm.Message{
-        {
-            Role: llm.RoleUser,
-            Parts: []llm.Part{
-                llm.ImagePart("image/png", imageBytes),
-                llm.TextPart("Describe what you see in this image."),
-            },
-        },
-    },
-})
-```
-
-### Explicit config (override environment)
-
-```go
-client, err := llm.NewClientWithConfig(llm.Config{
-    Provider: llm.ProviderOpenRouter,
-    Model:    "openai/gpt-4o",
-    APIKey:   os.Getenv("OPENROUTER_API_KEY"),
-})
-```
-
----
-
-## Environment Variables
-
-| Variable            | Description                                      |
-|---------------------|--------------------------------------------------|
-| `OLLAMA_HOST`       | Ollama base URL (e.g. `http://localhost:11434`). Presence triggers Ollama provider. |
-| `OPENROUTER_API_KEY`| OpenRouter API key. Presence triggers OpenRouter provider. |
-| `MODEL`             | Overrides the default model for whichever provider is selected. |
-
----
-
-## Streaming
-
-Both `Complete` (full response) and `Stream` (incremental chunks) are supported in v1.
-
-`Stream` uses the `bufio.Scanner`-style iterator pattern — idiomatic Go, no channels or callbacks required.
-
-```go
-// Stream sends a request and returns a StreamResponse for incremental reading.
-// The caller must always call Close() when done.
-func (c *Client) Stream(ctx context.Context, req Request) (*StreamResponse, error)
-
-// StreamResponse provides incremental access to generated text chunks.
-// Usage mirrors bufio.Scanner.
-type StreamResponse struct { ... }
-
-// Next advances to the next chunk. Returns false when the stream
-// is exhausted or an error occurs.
-func (s *StreamResponse) Next() bool
-
-// Chunk returns the current text chunk. Only valid after a true return from Next.
-func (s *StreamResponse) Chunk() string
-
-// Err returns any error encountered during streaming. Check after Next returns false.
-func (s *StreamResponse) Err() error
-
-// Close releases the underlying HTTP response body. Always call this.
-func (s *StreamResponse) Close() error
-```
-
-### Streaming example
-
-```go
-stream, err := client.Stream(ctx, llm.Request{
-    System: "You are a helpful assistant.",
-    Messages: []llm.Message{
-        {Role: llm.RoleUser, Parts: []llm.Part{llm.TextPart("Tell me a story.")}},
-    },
-})
-if err != nil {
-    log.Fatal(err)
-}
-defer stream.Close()
-
-for stream.Next() {
-    fmt.Print(stream.Chunk())
-}
-if err := stream.Err(); err != nil {
-    log.Fatal(err)
-}
-```
-
-### Internal streaming interface
-
-```go
-type provider interface {
-    complete(ctx context.Context, model string, req Request) (*Response, error)
-    stream(ctx context.Context, model string, req Request) (*StreamResponse, error)
-}
-```
-
-Both Ollama (`/api/chat` with `"stream": true`) and OpenRouter (OpenAI-compatible SSE) support server-sent event streaming. The internal adapters parse their respective SSE formats and expose a unified `StreamResponse`.
+`elwi [-model M] [-o base] [-f] [-s system] [-d] [prompt...]` — OpenRouter
+only; sends `modalities: ["image","text"]` and writes each image as
+`<base>.<ext>`, `<base>_2.<ext>`, …. Refuses to overwrite existing files
+unless `-f`, checking before making the (paid) API call. `-d` dumps HTTP
+traffic with the API key masked and bodies truncated to 4 KB.
 
 ---
 
@@ -325,12 +235,8 @@ Both Ollama (`/api/chat` with `"stream": true`) and OpenRouter (OpenAI-compatibl
 | Decision | Resolution |
 |----------|-----------|
 | Module path | `github.com/nealhardesty/easy-llm-wrapper` |
-| Provider priority | Claude CLI > OpenRouter > Ollama |
-| Streaming | Supported in v1 via `Stream()` + `StreamResponse` iterator |
-| Default models | `sonnet` (Claude CLI), `anthropic/claude-haiku-5.5` (OpenRouter), `qwen3.8:27b` (Ollama) |
-
-## Open Questions
-
-1. **Multi-turn / conversation history** — The `Messages []Message` slice supports it structurally, but no session management is provided. Callers build history themselves.
-2. **Ollama image encoding** — Ollama's API takes base64-encoded images directly. OpenRouter follows OpenAI's format (base64 data URLs). The internal adapters handle the translation.
-3. **Timeout / retry policy** — Leave to the caller via `context.Context` for now. No built-in retry logic.
+| Provider priority | `LLM_PROVIDER` > claude CLI > OpenRouter > Ollama |
+| Streaming | `Stream()` + `StreamResponse` iterator on all providers |
+| Claude transport | stream-json in and out over stdin/stdout |
+| Timeout / retry | Left to the caller via `context.Context`; no built-in retry |
+| Conversation state | None; callers build `Messages` themselves |

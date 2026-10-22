@@ -1,6 +1,7 @@
 // Package llm provides a unified, opinionated interface for making LLM prompt
-// queries via Ollama (local) or OpenRouter (cloud). Provider and model are
-// selected automatically from environment variables with sensible defaults.
+// queries via the Claude Code CLI, OpenRouter (cloud), or Ollama (local).
+// Provider and model are selected automatically from the environment with
+// sensible defaults.
 //
 // Quick start:
 //
@@ -23,9 +24,9 @@ type Client struct {
 	provider provider
 }
 
-// NewClient creates a Client by auto-detecting provider and model from
-// environment variables. Returns an error if neither OLLAMA_HOST nor
-// OPENROUTER_API_KEY is set.
+// NewClient creates a Client by auto-detecting provider and model from the
+// environment. Returns an error if no provider is available: no claude CLI on
+// PATH and neither OPENROUTER_API_KEY nor OLLAMA_HOST set.
 func NewClient() (*Client, error) {
 	cfg, err := configFromEnv()
 	if err != nil {
@@ -36,7 +37,9 @@ func NewClient() (*Client, error) {
 
 // NewClientWithConfig creates a Client with explicit configuration,
 // bypassing environment-based auto-detection. Useful for testing or overrides.
+// An empty Model or BaseURL falls back to the provider's default.
 func NewClientWithConfig(cfg Config) (*Client, error) {
+	cfg = cfg.withDefaults()
 	p, err := newProvider(cfg)
 	if err != nil {
 		return nil, err

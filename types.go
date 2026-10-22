@@ -56,6 +56,10 @@ type Request struct {
 	// Messages is the conversation. Typically one user message for single-turn
 	// use, or multiple for multi-turn conversations.
 	Messages []Message
+
+	// Modalities requests output modalities, e.g. []string{"image", "text"}
+	// for image-generation models. OpenRouter only; ignored by other providers.
+	Modalities []string
 }
 
 // Response is the LLM's reply to a complete (non-streaming) request.

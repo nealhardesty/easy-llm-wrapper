@@ -28,9 +28,10 @@ func newOpenRouterProvider(baseURL, apiKey string, transport http.RoundTripper) 
 // OpenRouter uses the OpenAI-compatible wire format.
 
 type openRouterRequest struct {
-	Model    string              `json:"model"`
-	Messages []openRouterMessage `json:"messages"`
-	Stream   bool                `json:"stream"`
+	Model      string              `json:"model"`
+	Messages   []openRouterMessage `json:"messages"`
+	Stream     bool                `json:"stream"`
+	Modalities []string            `json:"modalities,omitempty"`
 }
 
 // openRouterMessage.Content is either a plain string (text-only) or a slice
@@ -50,8 +51,15 @@ type openRouterImageURL struct {
 	URL string `json:"url"`
 }
 
+// openRouterError is the error object OpenRouter can embed in a 200 response
+// or a mid-stream SSE event.
+type openRouterError struct {
+	Message string `json:"message"`
+}
+
 type openRouterResponse struct {
-	Model   string `json:"model"`
+	Model   string           `json:"model"`
+	Error   *openRouterError `json:"error"`
 	Choices []struct {
 		Message struct {
 			// Content is a plain string for text responses or a JSON array of
@@ -66,6 +74,7 @@ type openRouterResponse struct {
 }
 
 type openRouterStreamChunk struct {
+	Error   *openRouterError `json:"error"`
 	Choices []struct {
 		Delta struct {
 			Content string `json:"content"`
@@ -140,9 +149,10 @@ func (o *openRouterProvider) do(ctx context.Context, body openRouterRequest) (*h
 
 func (o *openRouterProvider) complete(ctx context.Context, model string, req Request) (*Response, error) {
 	resp, err := o.do(ctx, openRouterRequest{
-		Model:    model,
-		Messages: o.buildMessages(req),
-		Stream:   false,
+		Model:      model,
+		Messages:   o.buildMessages(req),
+		Stream:     false,
+		Modalities: req.Modalities,
 	})
 	if err != nil {
 		return nil, err
@@ -152,6 +162,9 @@ func (o *openRouterProvider) complete(ctx context.Context, model string, req Req
 	var result openRouterResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("openrouter: decode response: %w", err)
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("openrouter: %s", result.Error.Message)
 	}
 	if len(result.Choices) == 0 {
 		return nil, fmt.Errorf("openrouter: no choices in response")
@@ -165,13 +178,14 @@ func (o *openRouterProvider) complete(ctx context.Context, model string, req Req
 	// Image-generation models (e.g. gemini-*-image-*) return images in
 	// message.images rather than inside message.content.
 	for _, p := range result.Choices[0].Message.Images {
-		if p.Type == "image_url" {
-			mimeType, data, parseErr := parseDataURI(p.ImageURL.URL)
-			if parseErr != nil {
-				return nil, fmt.Errorf("openrouter: parse image in message.images: %w", parseErr)
-			}
-			images = append(images, ImagePart(mimeType, data))
+		if p.Type != "image_url" || p.ImageURL == nil {
+			continue
 		}
+		img, err := imageFromURL(p.ImageURL.URL)
+		if err != nil {
+			return nil, fmt.Errorf("openrouter: image in message.images: %w", err)
+		}
+		images = append(images, img)
 	}
 
 	return &Response{Text: text, Model: result.Model, Images: images}, nil
@@ -179,9 +193,10 @@ func (o *openRouterProvider) complete(ctx context.Context, model string, req Req
 
 func (o *openRouterProvider) stream(ctx context.Context, model string, req Request) (*StreamResponse, error) {
 	resp, err := o.do(ctx, openRouterRequest{
-		Model:    model,
-		Messages: o.buildMessages(req),
-		Stream:   true,
+		Model:      model,
+		Messages:   o.buildMessages(req),
+		Stream:     true,
+		Modalities: req.Modalities,
 	})
 	if err != nil {
 		return nil, err
@@ -194,6 +209,11 @@ func (o *openRouterProvider) stream(ctx context.Context, model string, req Reque
 // OpenRouter response. Content may be a plain string or an array of typed parts
 // (text and/or image_url entries for multi-modal responses).
 func parseOpenRouterResponseContent(raw json.RawMessage) (text string, images []Part, err error) {
+	// Absent or null content (e.g. image-only or tool-call responses).
+	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+		return "", nil, nil
+	}
+
 	// Try plain string first (text-only response).
 	var s string
 	if jsonErr := json.Unmarshal(raw, &s); jsonErr == nil {
@@ -218,14 +238,28 @@ func parseOpenRouterResponseContent(raw json.RawMessage) (text string, images []
 		case "text":
 			texts = append(texts, p.Text)
 		case "image_url":
-			mimeType, data, parseErr := parseDataURI(p.ImageURL.URL)
-			if parseErr != nil {
-				return "", nil, fmt.Errorf("openrouter: parse image in response: %w", parseErr)
+			img, imgErr := imageFromURL(p.ImageURL.URL)
+			if imgErr != nil {
+				return "", nil, fmt.Errorf("openrouter: image in response: %w", imgErr)
 			}
-			images = append(images, ImagePart(mimeType, data))
+			images = append(images, img)
 		}
 	}
 	return strings.Join(texts, ""), images, nil
+}
+
+// imageFromURL converts a returned image URL into an image Part. Data URIs are
+// decoded in place; anything else (e.g. an https link) is reported clearly
+// rather than as a decode failure, since Part carries bytes, not URLs.
+func imageFromURL(url string) (Part, error) {
+	if !strings.HasPrefix(url, "data:") {
+		return Part{}, fmt.Errorf("unsupported image URL (only data URIs are supported): %.80s", url)
+	}
+	mimeType, data, err := parseDataURI(url)
+	if err != nil {
+		return Part{}, err
+	}
+	return ImagePart(mimeType, data), nil
 }
 
 // parseDataURI decodes a data URI of the form "data:<mime>;base64,<data>"
@@ -257,12 +291,13 @@ func parseDataURI(uri string) (mimeType string, data []byte, err error) {
 
 // parseOpenRouterChunk handles the SSE "data: {...}" line format.
 func parseOpenRouterChunk(line []byte) (string, bool, error) {
-	const prefix = "data: "
+	const prefix = "data:"
 	if !bytes.HasPrefix(line, []byte(prefix)) {
 		return "", false, nil // skip event/id/comment lines
 	}
 
-	payload := line[len(prefix):]
+	// The space after "data:" is optional per the SSE spec.
+	payload := bytes.TrimPrefix(line[len(prefix):], []byte(" "))
 	if string(payload) == "[DONE]" {
 		return "", true, nil
 	}
@@ -271,8 +306,14 @@ func parseOpenRouterChunk(line []byte) (string, bool, error) {
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return "", false, fmt.Errorf("openrouter: parse chunk: %w", err)
 	}
+	if chunk.Error != nil {
+		return "", true, fmt.Errorf("openrouter: %s", chunk.Error.Message)
+	}
 	if len(chunk.Choices) == 0 {
 		return "", false, nil
+	}
+	if fr := chunk.Choices[0].FinishReason; fr != nil && *fr == "error" {
+		return "", true, fmt.Errorf("openrouter: stream finished with error")
 	}
 
 	return chunk.Choices[0].Delta.Content, false, nil

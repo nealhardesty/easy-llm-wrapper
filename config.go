@@ -28,6 +28,7 @@ const (
 )
 
 const (
+	envProvider         = "LLM_PROVIDER"
 	envOllamaHost       = "OLLAMA_HOST"
 	envOpenRouterAPIKey = "OPENROUTER_API_KEY"
 	envModel            = "MODEL"
@@ -36,6 +37,7 @@ const (
 	defaultOllamaModel       = "qwen3.8:27b"
 	defaultOpenRouterModel   = "anthropic/claude-haiku-5.5"
 	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+	defaultOllamaHost        = "http://localhost:11434"
 )
 
 // Config holds explicit provider configuration. Used with NewClientWithConfig
@@ -63,53 +65,87 @@ func normalizeURL(u string) string {
 	return u
 }
 
+// withDefaults fills in the default model and base URL for the provider
+// wherever cfg leaves them empty.
+func (cfg Config) withDefaults() Config {
+	switch cfg.Provider {
+	case ProviderClaude:
+		if cfg.Model == "" {
+			cfg.Model = defaultClaudeModel
+		}
+	case ProviderOpenRouter:
+		if cfg.Model == "" {
+			cfg.Model = defaultOpenRouterModel
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = defaultOpenRouterBaseURL
+		}
+	case ProviderOllama:
+		if cfg.Model == "" {
+			cfg.Model = defaultOllamaModel
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = defaultOllamaHost
+		}
+		cfg.BaseURL = normalizeURL(cfg.BaseURL)
+	}
+	return cfg
+}
+
 // configFromEnv auto-detects provider and model from environment variables.
-// Priority: claude CLI (if on PATH) > OpenRouter (if API key set) > Ollama (if host set).
+// LLM_PROVIDER forces a provider; otherwise the priority is
+// claude CLI (if on PATH) > OpenRouter (if API key set) > Ollama (if host set).
 func configFromEnv() (Config, error) {
+	cfg, err := detectProvider()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Model = os.Getenv(envModel)
+	return cfg.withDefaults(), nil
+}
+
+func detectProvider() (Config, error) {
+	key := os.Getenv(envOpenRouterAPIKey)
+	host := os.Getenv(envOllamaHost)
+
+	if forced := strings.ToLower(strings.TrimSpace(os.Getenv(envProvider))); forced != "" {
+		debugf("%s=%s forces provider", envProvider, forced)
+		switch ProviderType(forced) {
+		case ProviderClaude:
+			if _, err := lookPath("claude"); err != nil {
+				return Config{}, fmt.Errorf("%s=claude but claude binary not found in PATH: %w", envProvider, err)
+			}
+			return Config{Provider: ProviderClaude}, nil
+		case ProviderOpenRouter:
+			if key == "" {
+				return Config{}, fmt.Errorf("%s=openrouter but %s is not set", envProvider, envOpenRouterAPIKey)
+			}
+			return Config{Provider: ProviderOpenRouter, APIKey: key}, nil
+		case ProviderOllama:
+			return Config{Provider: ProviderOllama, BaseURL: host}, nil
+		default:
+			return Config{}, fmt.Errorf("%s=%q: want claude, openrouter, or ollama", envProvider, forced)
+		}
+	}
+
 	if path, err := lookPath("claude"); err == nil {
 		debugf("claude binary found at %s", path)
-		model := defaultClaudeModel
-		if m := os.Getenv(envModel); m != "" {
-			model = m
-		}
-		return Config{
-			Provider: ProviderClaude,
-			Model:    model,
-		}, nil
+		return Config{Provider: ProviderClaude}, nil
 	} else {
 		debugf("claude binary not found: %v", err)
 	}
 
-	if key := os.Getenv(envOpenRouterAPIKey); key != "" {
+	if key != "" {
 		debugf("using OpenRouter (API key set)")
-		model := defaultOpenRouterModel
-		if m := os.Getenv(envModel); m != "" {
-			model = m
-		}
-		return Config{
-			Provider: ProviderOpenRouter,
-			Model:    model,
-			BaseURL:  defaultOpenRouterBaseURL,
-			APIKey:   key,
-		}, nil
-	} else {
-		debugf("OpenRouter skipped: %s not set", envOpenRouterAPIKey)
+		return Config{Provider: ProviderOpenRouter, APIKey: key}, nil
 	}
+	debugf("OpenRouter skipped: %s not set", envOpenRouterAPIKey)
 
-	if host := os.Getenv(envOllamaHost); host != "" {
+	if host != "" {
 		debugf("using Ollama at %s", host)
-		model := defaultOllamaModel
-		if m := os.Getenv(envModel); m != "" {
-			model = m
-		}
-		return Config{
-			Provider: ProviderOllama,
-			Model:    model,
-			BaseURL:  normalizeURL(host),
-		}, nil
-	} else {
-		debugf("Ollama skipped: %s not set", envOllamaHost)
+		return Config{Provider: ProviderOllama, BaseURL: host}, nil
 	}
+	debugf("Ollama skipped: %s not set", envOllamaHost)
 
 	return Config{}, fmt.Errorf("no LLM provider configured: install claude CLI, or set %s or %s", envOpenRouterAPIKey, envOllamaHost)
 }

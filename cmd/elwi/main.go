@@ -5,7 +5,7 @@
 //
 //	elwi [flags] [prompt]
 //
-// Requires OPENROUTER_API_KEY. Defaults to google/gemini-2.0-flash-exp for
+// Requires OPENROUTER_API_KEY. Defaults to google/gemini-3.1-flash-image for
 // image generation unless overridden by -model or the MODEL env var.
 package main
 
@@ -23,7 +23,7 @@ import (
 	llm "github.com/nealhardesty/easy-llm-wrapper"
 )
 
-const defaultImageModel = "google/gemini-3.1-flash-image-preview"
+const defaultImageModel = "google/gemini-3.1-flash-image"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -31,6 +31,7 @@ func main() {
 	debug := flag.Bool("d", false, "enable debug output (model, timing, image info)")
 	system := flag.String("s", "", "system prompt")
 	output := flag.String("o", "output", "output file base name (extension appended from MIME type)")
+	force := flag.Bool("f", false, "overwrite existing output files")
 	model := flag.String("model", "", fmt.Sprintf("override image generation model (default: %s)", defaultImageModel))
 
 	flag.Usage = func() {
@@ -99,6 +100,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "[openrouter / %s]\n", effectiveModel)
 	}
 
+	// Fail before paying for a generation whose result we couldn't save.
+	if !*force {
+		for _, ext := range []string{".png", ".jpg", ".gif", ".webp", ".bin"} {
+			if _, err := os.Stat(*output + ext); err == nil {
+				fmt.Fprintf(os.Stderr, "error: %s exists (use -f to overwrite, or -o to pick another name)\n", *output+ext)
+				os.Exit(1)
+			}
+		}
+	}
+
 	var transport http.RoundTripper
 	if *debug {
 		transport = &dumpTransport{w: os.Stderr}
@@ -107,7 +118,6 @@ func main() {
 	client, err := llm.NewClientWithConfig(llm.Config{
 		Provider:  llm.ProviderOpenRouter,
 		Model:     effectiveModel,
-		BaseURL:   "https://openrouter.ai/api/v1",
 		APIKey:    apiKey,
 		Transport: transport,
 		Debug:     *debug,
@@ -124,6 +134,7 @@ func main() {
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Parts: []llm.Part{llm.TextPart(prompt)}},
 		},
+		Modalities: []string{"image", "text"},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -152,7 +163,14 @@ func main() {
 		}
 		filename += ext
 
-		if err := os.WriteFile(filename, img.Data, 0644); err != nil {
+		flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		if !*force {
+			flags |= os.O_EXCL
+		}
+		if err := writeFile(filename, img.Data, flags); err != nil {
+			if os.IsExist(err) {
+				err = fmt.Errorf("file exists (use -f to overwrite)")
+			}
 			fmt.Fprintf(os.Stderr, "error writing %s: %v\n", filename, err)
 			os.Exit(1)
 		}
@@ -180,14 +198,40 @@ func extFromMIME(mimeType string) string {
 	}
 }
 
+// writeFile writes data to name using the given open flags.
+func writeFile(name string, data []byte, flags int) error {
+	f, err := os.OpenFile(name, flags, 0644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// maxDumpBytes caps each dumped request/response so base64 images don't flood the terminal.
+const maxDumpBytes = 4096
+
 // dumpTransport is an http.RoundTripper that logs raw request and response to w.
+// The Authorization header is masked and dumps are truncated.
 type dumpTransport struct {
 	w io.Writer
 }
 
 func (t *dumpTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	reqDump, _ := httputil.DumpRequestOut(req, true)
-	fmt.Fprintf(t.w, "[debug] >>> REQUEST\n%s\n", reqDump)
+	redacted := req.Clone(req.Context())
+	if auth := redacted.Header.Get("Authorization"); auth != "" {
+		redacted.Header.Set("Authorization", "Bearer "+mask(strings.TrimPrefix(auth, "Bearer ")))
+	}
+	if req.GetBody != nil {
+		if body, err := req.GetBody(); err == nil {
+			redacted.Body = body
+		}
+	}
+	reqDump, _ := httputil.DumpRequestOut(redacted, true)
+	fmt.Fprintf(t.w, "[debug] >>> REQUEST\n%s\n", truncate(reqDump))
 
 	resp, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil {
@@ -195,8 +239,15 @@ func (t *dumpTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	respDump, _ := httputil.DumpResponse(resp, true)
-	fmt.Fprintf(t.w, "[debug] <<< RESPONSE\n%s\n", respDump)
+	fmt.Fprintf(t.w, "[debug] <<< RESPONSE\n%s\n", truncate(respDump))
 	return resp, nil
+}
+
+func truncate(b []byte) string {
+	if len(b) <= maxDumpBytes {
+		return string(b)
+	}
+	return fmt.Sprintf("%s\n... [%d more bytes truncated]", b[:maxDumpBytes], len(b)-maxDumpBytes)
 }
 
 // debugf prints a debug line to stderr with a consistent prefix.

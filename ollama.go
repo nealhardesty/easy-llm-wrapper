@@ -40,6 +40,7 @@ type ollamaChunk struct {
 	Model   string        `json:"model"`
 	Message ollamaMessage `json:"message"`
 	Done    bool          `json:"done"`
+	Error   string        `json:"error"` // set when Ollama fails after sending 200
 }
 
 func (o *ollamaProvider) buildMessages(req Request) []ollamaMessage {
@@ -106,6 +107,9 @@ func (o *ollamaProvider) complete(ctx context.Context, model string, req Request
 	if err := json.NewDecoder(resp.Body).Decode(&chunk); err != nil {
 		return nil, fmt.Errorf("ollama: decode response: %w", err)
 	}
+	if chunk.Error != "" {
+		return nil, fmt.Errorf("ollama: %s", chunk.Error)
+	}
 
 	return &Response{Text: chunk.Message.Content, Model: chunk.Model}, nil
 }
@@ -127,6 +131,9 @@ func parseOllamaChunk(line []byte) (string, bool, error) {
 	var chunk ollamaChunk
 	if err := json.Unmarshal(line, &chunk); err != nil {
 		return "", false, fmt.Errorf("ollama: parse chunk: %w", err)
+	}
+	if chunk.Error != "" {
+		return "", true, fmt.Errorf("ollama: %s", chunk.Error)
 	}
 	if chunk.Done {
 		return "", true, nil
